@@ -1,7 +1,7 @@
-# Overview
-
 This plugin was built to demonstrate and test the system I use to simulate light conditions in 3D space.  The classes are taken from my tree generation program, where they are
 used to simulate phototropic growth in trees.  
+
+# How it works
 
 First, two key data structures are created:
   1.  A cubic grid, represented with a 3 dimensional array of `GridUnit`.

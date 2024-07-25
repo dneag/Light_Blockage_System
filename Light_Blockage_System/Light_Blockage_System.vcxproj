@@ -171,7 +171,7 @@
     <ClInclude Include="UpdateGridDisplay.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\..\..\Documents\maya\scripts\Launch_Tester_GUI.py" />
+    <None Include="..\..\..\..\Documents\maya\scripts\Tester_GUI.py" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

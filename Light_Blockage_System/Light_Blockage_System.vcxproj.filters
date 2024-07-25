@@ -85,7 +85,7 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\..\..\Documents\maya\scripts\Launch_Tester_GUI.py">
+    <None Include="..\..\..\..\Documents\maya\scripts\Tester_GUI.py">
       <Filter>Source Files</Filter>
     </None>
   </ItemGroup>

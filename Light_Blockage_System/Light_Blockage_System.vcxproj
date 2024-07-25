@@ -147,15 +147,31 @@
   <ItemGroup>
     <ClCompile Include="BlockPoint.cpp" />
     <ClCompile Include="BlockPointGrid.cpp" />
+    <ClCompile Include="CreateBlockPointGrid.cpp" />
     <ClCompile Include="GridManager.cpp" />
     <ClCompile Include="GridUnit.cpp" />
+    <ClCompile Include="MathHelper.cpp" />
+    <ClCompile Include="ModifyBlockPoints.cpp" />
     <ClCompile Include="pluginMain.cpp" />
+    <ClCompile Include="ShadeVector.cpp" />
+    <ClCompile Include="SimpleShapes.cpp" />
+    <ClCompile Include="UpdateGridDisplay.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BlockPoint.h" />
     <ClInclude Include="BlockPointGrid.h" />
+    <ClInclude Include="CreateBlockPointGrid.h" />
     <ClInclude Include="GridManager.h" />
     <ClInclude Include="GridUnit.h" />
+    <ClInclude Include="MathHelper.h" />
+    <ClInclude Include="ModifyBlockPoints.h" />
+    <ClInclude Include="Point_Int.h" />
+    <ClInclude Include="ShadeVector.h" />
+    <ClInclude Include="SimpleShapes.h" />
+    <ClInclude Include="UpdateGridDisplay.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\..\Documents\maya\scripts\Launch_Tester_GUI.py" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -4,6 +4,47 @@
 
 #include "GridUnit.h"
 
+void GridUnit::applyShadeVector(ShadeVector& sv) {
+
+	// If this shade index is not an ASI for this unit, insert it.  Otherwise, add to its paths
+	const auto it = appliedShadeVectors.find(&sv);
+	if (it == appliedShadeVectors.end()) {
+
+		appliedShadeVectors.emplace(&sv, sv.convergedPaths);
+	}
+	else {
+		it->second += sv.convergedPaths;
+	}
+
+	shadeVectorSum += sv.combinedShadeVector;
+	totalShade += sv.combinedShadeVector.length();
+}
+
+MStatus GridUnit::unapplyShadeVector(ShadeVector& sv) {
+
+	// This assumes we always have added the correct amount of converged paths for each applied shade index, and that we always remove the correct amount
+	const auto it = appliedShadeVectors.find(&sv);
+	if (it == appliedShadeVectors.end()) {
+		MGlobal::displayError(MString() + "Attempted to remove shade index " + sv.toUnit.toMString() + " from grid unit " + name + " but it did not exist");
+		return MS::kFailure;
+	}
+
+	it->second -= sv.convergedPaths;
+	if (it->second < 0) {
+		MGlobal::displayError(MString() + "Removed more paths than existed from applied shade index at grid unit " + name);
+		return MS::kFailure;
+	}
+	if (it->second == 0) {
+
+		appliedShadeVectors.erase(it);
+	}
+
+	shadeVectorSum -= sv.combinedShadeVector;
+	totalShade -= sv.combinedShadeVector.length();
+
+	return MS::kSuccess;
+}
+
 void GridUnit::updateLightDirection(double intensity, double maxShade, const MVector& unblockedLightDirection) {
 
 	// If there is no blockage, set the light vector equal to unblockedLightDirection
@@ -199,12 +240,9 @@ MStatus GridUnit::setUVsToTile(double transparencyTileMapTileSize, double maxSha
 
 MStatus GridUnit::updateArrowMesh() {
 
-	/*MGlobal::displayInfo(MString() + __FUNCTION__ + " unit " + name + " currentMeshDirection: " + currentMeshDirection.x + ", " + currentMeshDirection.y + ", " +
-		currentMeshDirection.z + ", lightDirection: " + lightDirection.x + ", " + lightDirection.y + ", " + lightDirection.z);*/
 	if (arrowTransformNode.isNull() || currentMeshDirection == lightDirection)
 		return MS::kSuccess;
 
-	//MGlobal::displayInfo(MString() + __FUNCTION__ + " unit " + name + " applying rotation");
 	MStatus status;
 	MQuaternion meshDirRotation(currentMeshDirection, lightDirection);
 	MFnTransform arrowFn(arrowTransformNode, &status);
@@ -212,48 +250,6 @@ MStatus GridUnit::updateArrowMesh() {
 	arrowFn.rotateBy(meshDirRotation, MSpace::kTransform);
 	SimpleShapes::lockRotates(arrowFn.name());
 	currentMeshDirection = lightDirection;
-
-	return MS::kSuccess;
-}
-
-void GridUnit::applyShadeVector(ShadeVector& sv) {
-
-	// If this shade index is not an ASI for this unit, insert it.  Otherwise, add to its paths
-	const auto it = appliedShadeVectors.find(&sv);
-	if (it == appliedShadeVectors.end()) {
-		//MGlobal::displayInfo(MString() + "adding shade index " + next.toUnit.toMString() + " with " + next.convergedPaths + " to unit " + unit.name);
-		appliedShadeVectors.emplace(&sv, sv.convergedPaths);
-	}
-	else {
-		it->second += sv.convergedPaths;
-	}
-
-	shadeVectorSum += sv.combinedShadeVector;
-	totalShade += sv.combinedShadeVector.length();
-	//MGlobal::displayInfo(MString() + "total shade now: " + unit.totalShade + ". csv length: " + next.combinedShadeVector.length() +", base sv length: " + next.shadeVector.length());
-}
-
-MStatus GridUnit::unapplyShadeVector(ShadeVector& sv) {
-
-	// This would assume we always have added the correct amount of converged paths for each applied shade index, and that we always remove the correct amount
-	const auto it = appliedShadeVectors.find(&sv);
-	if (it == appliedShadeVectors.end()) {
-		MGlobal::displayError(MString() + "Attempted to remove shade index " + sv.toUnit.toMString() + " from grid unit " + name + " but it did not exist");
-		return MS::kFailure;
-	}
-
-	it->second -= sv.convergedPaths;
-	if (it->second < 0) {
-		MGlobal::displayError(MString() + "Removed more paths than existed from applied shade index at grid unit " + name);
-		return MS::kFailure;
-	}
-	if (it->second == 0) {
-		//MGlobal::displayInfo(MString() + "Removing shade index " + it->first->toUnit.toMString() + " from unit " + unit.name);
-		appliedShadeVectors.erase(it);
-	}
-
-	shadeVectorSum -= sv.combinedShadeVector;
-	totalShade -= sv.combinedShadeVector.length();
 
 	return MS::kSuccess;
 }

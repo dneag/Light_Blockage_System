@@ -1,5 +1,5 @@
 /*
-A GridUnit is the unit of the BlockPointGrid.  Each unit stores information representing the light conditions in its volume.
+	A GridUnit is the unit of the BlockPointGrid.  Each unit stores information representing the light conditions in its volume.
 
 */
 
@@ -37,8 +37,8 @@ class GridUnit {
 	// The sum of all shade vectors affecting this unit.  
 	MVector shadeVectorSum = MVector(0., 0., 0.);
 
-	// These represent the shade indices applied to this unit from other dense units above it.  The keys are the shade indexes and the values
-	// represent the number of the shade index's paths that have reached the unit
+	// These represent the shade indices applied to this unit from other dense units above it.  The keys are the shade vectors and the values
+	// represent the number of the shade vector's paths that have reached the unit
 	std::unordered_map<ShadeVector*, std::size_t> appliedShadeVectors;
 
 	// The sum of all block points' densities within this unit.  This value can fall outside of the 0 - 1 range, however, when it is used

@@ -48,7 +48,6 @@ MStatus GridManager::updateGridDisplay(bool d, double dist, double r, double nc,
 
 	display = d;
 	displayBlockPoints = dbp;
-	maintainBPs = maintain;
 
 	return MS::kSuccess;
 }

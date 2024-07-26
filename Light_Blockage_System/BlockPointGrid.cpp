@@ -490,15 +490,17 @@ MStatus BlockPointGrid::applyShade() {
 
 MStatus BlockPointGrid::propagateFrom(ShadeVector* startingShadeIndex, std::size_t convergedPaths, Point_Int blockerIndex, bool add) {
 
-	//MGlobal::displayInfo(MString() + "Propagating " + add + " from: " + startingShadeIndex->toUnit.toMString() + " with blocker " + blockerIndex.toMString());
 	std::queue<std::shared_ptr<ShadeVector>> svs;
-	std::unordered_set<std::shared_ptr<ShadeVector>> encountered; // I don't think we need to put shadeRoot in here
+	std::unordered_set<std::shared_ptr<ShadeVector>> encountered;
+
+	// Note that startingShadeIndex is not applied.  We start with its children.
 	startingShadeIndex->getBlocked(svs, encountered, convergedPaths);
 
 	while (!svs.empty()) {
 
 		ShadeVector& next = *svs.front();
 
+		// Get the index of the grid unit pointed to by this sv
 		int X = blockerIndex.x + next.toUnit.x;
 		int Y = blockerIndex.y + next.toUnit.y;
 		int Z = blockerIndex.z + next.toUnit.z;
@@ -537,7 +539,7 @@ void BlockPointGrid::updateAllUnitsLightDirection() {
 		displayAffectedUnitArrowIf(*unit);
 
 		if (!displayShadedUnitArrows && unit->arrowMeshIsVisible()) {
-			//MGlobal::displayInfo(MString() + "updating mesh for " + unit->name);
+
 			unit->updateArrowMesh();
 			unit->setArrowShadePlug(maximumShade);
 		}
@@ -546,47 +548,6 @@ void BlockPointGrid::updateAllUnitsLightDirection() {
 	}
 
 	dirtyUnits.clear();
-}
-
-bool BlockPointGrid::getStartAndEndIndices(Point_Int& startInd, Point_Int& endInd, const Point_Int& centerUnitInd, int indexRange) {
-
-	startInd = { centerUnitInd.x - indexRange, centerUnitInd.y - indexRange, centerUnitInd.z - indexRange };
-
-	// First make sure the display range isn't completely outside of the grid
-	int indexRangeX2 = indexRange * 2;
-	if (startInd.x + indexRangeX2 < 0 || startInd.x > xElements ||
-		startInd.y + indexRangeX2 < 0 || startInd.y > yElements ||
-		startInd.z + indexRangeX2 < 0 || startInd.z > zElements) {
-
-		return false;
-	}
-
-	// Then cut off indices that are outside the grid
-	startInd = { std::max(startInd.x, 0), std::max(startInd.y, 0), std::max(startInd.z, 0) };
-	endInd = { std::min(centerUnitInd.x + indexRange + 1, xElements), std::min(centerUnitInd.y + indexRange + 1, yElements), std::min(centerUnitInd.z + indexRange + 1, zElements) };
-
-	int totalUnitsDisplayed = (endInd.x - startInd.x) * (endInd.y - startInd.y) * (endInd.z - startInd.z);
-	//MGlobal::displayInfo(MString() + "Total units to display: " + totalUnitsDisplayed);
-	if (totalUnitsDisplayed > 1300) {
-		MGlobal::displayInfo(MString() + "Aborting grid display.  Attempted to display too many (" + totalUnitsDisplayed + ") units at once");
-		return false;
-	}
-
-	return true;
-}
-
-MStatus BlockPointGrid::getDirectionAndBlockage(const MPoint& meriLoc, MVector& chosenDirection, double& blockage) const {
-
-	Point_Int unitIndex = pointToIndex(meriLoc);
-
-	if (!this->indicesAreInRange_showError(unitIndex.x, unitIndex.y, unitIndex.z))
-		return MS::kFailure;
-
-	const GridUnit* unit = &grid[unitIndex.x][unitIndex.y][unitIndex.z];
-	chosenDirection = unit->getLightDirection();
-	blockage = unit->getTotalShade() / maximumShade;
-
-	return MS::kSuccess;
 }
 
 inline bool BlockPointGrid::indicesAreOnGrid(int x, int y, int z) const {

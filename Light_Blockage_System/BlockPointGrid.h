@@ -2,19 +2,8 @@
 BlockPointGrid.h
 
 This system is designed to simulate a 3D space in which physical objects block the light from above, influencing
-the direction and vigor with which any trees below them tend to grow.
+the growth rate and direction of any trees below them.
 
-A BlockPointGrid represents a 3D grid made of cubic units.
-
-Each unit stores three important variables (See GridUnit.h for details):
-
-	1. A 3D unit vector that represents the direction towards the greatest amount of light.
-	2. A scalar value representing the amount of light the unit blocks.
-	3. A 3D vector representing the direction and amount of light blocked (aka shade) from the unit.
-
-When a BlockPoint is placed, it increases the density of the unit it falls in by an amount equal to its density.  In turn, the unit will adjust the
-light vectors and light blocked of any units that it blocks.  The blocked units are those that fall in the spherical sector below the blocking unit.  The size of the sector
-is determined by the members, halfConeAngle and shadeRange.
 */
 
 #pragma once
@@ -112,7 +101,7 @@ class BlockPointGrid {
 
 	double intensity = 0.;
 
-	// GridUnits whose partial shade vectors have changed.  This is checked, handled, and cleared after all blockpoint / segment adjustments have been made for 
+	// GridUnits whose light conditions have changed.  This is checked, handled, and cleared after all blockpoint / segment adjustments have been made for 
 	// all trees for a given time loop or after post deformers
 	std::unordered_set<GridUnit*> dirtyUnits;
 
@@ -148,8 +137,6 @@ class BlockPointGrid {
 	double getIntersectionWithShadeRange(const MVector& vectorToUnit, int timesToDivide) const;
 
 	static void divideCubeToEighths(const MVector& cubeCenter, double size, std::vector<MVector>& subdivisions);
-
-	bool getStartAndEndIndices(Point_Int& startInd, Point_Int& endInd, const Point_Int& centerUnitInd, int indexRange);
 
 	// Checks that each index is within the range of the grid and output an error message if not
 	inline bool indicesAreInRange_showError(int x, int y, int z) const;
@@ -214,23 +201,10 @@ public:
 		return std::find(blockPoints.begin(), blockPoints.end(), bp) != blockPoints.end();
 	}
 
-	// Access the grid unit corresponding to a meri's location to get its growth direction and light blockage
-	MStatus getDirectionAndBlockage(const MPoint& meriLoc, MVector& chosenDirection, double& blockage) const;
-
-	// Must only be used after all blockpoints / grid units have been updated for all trees for some event.  Currently there are 5 cases:
-	//    1. - Before all trees have started their time loop (or after they have all finished)
-	//    2. - After post deformers
-	//    3. - If the grid manager specifies deleting blockpoints, after all trees have been deleted
-	//    4. - After deleteAllBlockPoints, which is called via updateGridDisplay when 'delete block points' is specified 
-	//    5. - After adjustUnitDensity command has adjusted all selected units
 	void updateAllUnitsLightDirection();
 
+	// Applies or unapplies shade from any grid units that have had block points added or removed.
 	MStatus applyShade();
-
-	MVector getUnblockedDirection() const {
-
-		return unblockedDirection;
-	}
 
 	// Visit every grid unit and execute `func`, which takes a GridUnit reference as argument
 	// startInd will be the first 3 dimensional index
@@ -245,20 +219,22 @@ public:
 		this->traverseRange(start, end, func, status);
 	}
 
+	// Adds callbacks to the bps passed.  These will alter the grid state when block points are moved or removed
 	void attachBPCallbacks(std::vector<std::shared_ptr<BlockPoint>> bps);
 
-	// Triggers when blockpoints are moved in the Maya viewport.  Used for debugging only.
+	// Triggers when blockpoints are moved in the Maya viewport. 
 	static void updateGridFromBPChange(MNodeMessage::AttributeMessage msg, MPlug& plug, MPlug& otherPlug, void* clientData);
 
-	// Triggers when blockpoints are deleted in the Maya viewport. Used for debugging only.
+	// Triggers when blockpoints are deleted in the Maya viewport. 
 	static void updateGridAfterBPRemoval(MObject& node, void* clientData);
 
+	// Display the block points passed.
 	void displayBlockPoints(std::vector<std::shared_ptr<BlockPoint>> bpsToDisplay);
 
-	static MVector getObjectTranslation(MObject obj, MStatus& status);
-
-	// Can be used as a toggle.  If d is true, displays block point meshes, else hides them
+	// Can be used as a toggle.  If d is true, displays block point meshes, otherwise hides them
 	void displayAllBlockPoints(bool d);
+
+	static MVector getObjectTranslation(MObject obj, MStatus& status);
 
 	void setDisplayPercentageThreshhold(double value) { displayPercentageThreshhold = value; }
 	void toggleDisplayShadedUnits(bool display);

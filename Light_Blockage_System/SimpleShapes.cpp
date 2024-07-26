@@ -314,14 +314,14 @@ MObject SimpleShapes::makeSphere(const MPoint& location, double radius, std::str
 void SimpleShapes::setObjectMaterial(MObject& shapeNode, MObject& shadingGroup) {
 
 	if (shadingGroup.isNull()) {
-		MGlobal::displayError(MString() + "Shading group not found: " + MFnDagNode(shadingGroup).name());
+		//MGlobal::displayError(MString() + "Shading group not found: " + MFnDagNode(shadingGroup).name());
 		return;
 	}
 
 	// shadingGroup is of type kShadingEngine, which has the MFnSet function set.  I think this is because a single kShadingEngine object can be applied to multiple meshes
 	MFnSet fnSet(shadingGroup);
 
-	// The following two lines do the same thing - add the shape node to the shading group.  The wacky second one suppresses the output message to the script editor
+	// The following two lines do the same thing - add the shape node to the shading group.  The wacky second one suppresses the output message to the script editor.
 	//fnSet.addMember(shapeNode);
 	MGlobal::executeCommand("catch(`sets -edit -forceElement " + fnSet.name() + " " + MFnDagNode(shapeNode).fullPathName() + "`);", false, false);
 }

@@ -26,7 +26,7 @@ struct ShadeVector {
 	// This is required to make propagation more effiecient. Note that its value is unique to each propagation.
 	MVector combinedShadeVector = MVector(0., 0., 0.);
 
-	// A 3D integer vector which, when added to a grid unit, results in the index in the BlockPointGrid::grid 3D array, of the unit it shades
+	// A 3D integer vector which, when added to a grid unit, results in the index in the BlockPointGrid::grid 3D array of the unit it shades
 	Point_Int toUnit;
 
 	// A list of pointers to child ShadeVectors

@@ -19,21 +19,16 @@ MStatus UpdateGridDisplay::doIt(const MArgList& argList) {
 	double range = argData.flagArgumentDouble("-r", 0);
 	double nearClip = argData.flagArgumentDouble("-nc", 0);
 	bool displayBPs = argData.flagArgumentBool("-dbp", 0);
-	bool maintainBPs = argData.flagArgumentBool("-mtn", 0);
 	bool deleteBPs = argData.flagArgumentBool("-dlb", 0);
 	bool displayShadedUnits = argData.flagArgumentBool("-dsu", 0);
 	bool displayShadedUnitArrows = argData.flagArgumentBool("-dua", 0);
 	double displayPercentageThresh = argData.flagArgumentDouble("-dpt", 0);
 
-	MGlobal::displayInfo(MString() + "Updating grid display.\n\tdisplay: " + disp + "\n\tdistance to poi: " + distance + "\n\trange: " + range + "\n\tnear clip: " + nearClip
-		+ "\n\tdisplay block points: " + displayBPs + "\n\tmaintain: " + maintainBPs + "\n\tdelete: " + deleteBPs + "\n\tdisplay shaded units: " + displayShadedUnits
-		+ "\n\tdisplayShadedUnitArrows: " + displayShadedUnitArrows + "\n\tdisplayPercentageThresh: " + displayPercentageThresh);
-
 	// Newly created objects will be automatically selected if we harden edges, so we have to take steps to preserve the current selection just in case
 	MSelectionList originalSelection;
 	MGlobal::getActiveSelectionList(originalSelection);
 
-	GridManager::getInstance().updateGridDisplay(disp, distance, range, nearClip, displayBPs, maintainBPs, deleteBPs, displayShadedUnits, displayShadedUnitArrows, displayPercentageThresh);
+	GridManager::getInstance().updateGridDisplay(disp, distance, range, nearClip, displayBPs, 0, deleteBPs, displayShadedUnits, displayShadedUnitArrows, displayPercentageThresh);
 
 	MGlobal::setActiveSelectionList(originalSelection);
 

@@ -115,7 +115,11 @@ MSyntax CreateBlockPointGrid::newSyntax() {
 	syntax.addFlag("-gr", "-grid size", MSyntax::kDouble);
 	syntax.addFlag("-b", "-base", MSyntax::kDouble);
 	syntax.makeFlagMultiUse("-b");
-	syntax.addFlag("-r", "-range", MSyntax::kDouble);
+
+	// The radius of the spherical sector that is the shade range
+	syntax.addFlag("-r", "-radius", MSyntax::kDouble);
+
+	// Half of the angle of the spherical sector that is the shade range
 	syntax.addFlag("-hca", "-half cone angle", MSyntax::kDouble);
 	syntax.addFlag("-i", "-intensity", MSyntax::kDouble);
 

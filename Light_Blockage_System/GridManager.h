@@ -17,21 +17,16 @@
 #include "BlockPointGrid.h"
 #include "SimpleShapes.h"
 
+/*
+	Once a BlockPointGrid is created, the GridManager keeps it alive as long as the plugin is loaded.  This is a singleton
+	which is instantiated whenever one of our MPxCommands is called.
+*/
 class GridManager {
-
-	inline static MStatus gridStatus;
 
 	std::vector<std::shared_ptr<BlockPointGrid>> grids;
 
-	std::vector<MObject> cameraTransforms;
-
-	MCallbackIdArray cameraCallbacksIds;
-
 	bool display = false;
 	bool displayBlockPoints = false;
-
-	// If true, block points created by a tree will not be deleted after its mesh is created
-	bool maintainBPs = false;
 
 	GridManager() {
 
@@ -50,8 +45,6 @@ public:
 	~GridManager() {
 
 		MGlobal::displayInfo("GridManager and grids destroyed");
-
-		MMessage::removeCallbacks(cameraCallbacksIds);
 	}
 
 	void newGrid(double XSIZE, double YSIZE, double ZSIZE, double UNITSIZE, MPoint BASE, double DETECTIONRANGE, double CONERANGEANGLE, double INTENSITY);
@@ -59,10 +52,6 @@ public:
 	std::size_t gridCount() { return grids.size(); }
 
 	std::shared_ptr<BlockPointGrid> getGrid(unsigned int index, MStatus& status);
-
-	bool shouldMaintainBPs() const { return maintainBPs; }
-
-	bool isDisplayingBlockPoints() const { return displayBlockPoints; }
 
 	MStatus updateGridDisplay(bool d, double dist, double r, double nc, bool dbp, bool maintain, bool deleteBPs, bool dsu, bool dua, double dpt);
 

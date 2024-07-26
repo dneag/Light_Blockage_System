@@ -10,4 +10,19 @@ First, two key data structures are created:
       is used to propagate shade when grid units' states change.
 
 With these established, `BlockPoint`s can be added to any location on the grid.  Adding, moving, or removing a BlockPoint will trigger shade propagation, causing
-grid units within a specified range to become shaded.
+grid units within a specified range to become more or less shaded.
+
+# Usage
+
+* You will need Autodesk Maya 2022 installed.
+* Download Light_Blockage_System.mll and place it whereever you like.
+* Locate the Maya.env file at C:\Users\{you}\Documents\maya\2022\Maya.env and set the maya plugin path variable like so:
+  ```
+  MAYA_PLUG_IN_PATH = C:\Your\Path\To\Light_Blockage_System.mll;
+* Copy or download the Tester_GUI.py script and place the file in Documents\maya\scripts
+* Open Maya's script editor and execute the following:
+  ```
+  import importlib
+  import Tester_GUI
+  importlib.reload(Tester_GUI)
+  Tester_GUI.GUI()

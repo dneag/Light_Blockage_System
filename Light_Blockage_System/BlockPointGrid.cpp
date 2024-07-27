@@ -8,8 +8,8 @@ BlockPointGrid.cpp
 
 void BlockPointGrid::createIndexVectorTree() {
 
-	// Index vectors to neighboring units on sides and below, including diagonals.  Note that the order of these is significant as it is the order that we will search for units 
-	// blocked by another unit.
+	// Index vectors to neighboring units on sides and below, including diagonals.  Note that the order of these is significant as it is the order that
+	// we will search for units blocked by another unit.
 	std::vector<Point_Int> VECTORS_TO_NEIGHBORS = {
 		{0,-1,0},
 		{-1,0,-1},
@@ -31,16 +31,29 @@ void BlockPointGrid::createIndexVectorTree() {
 	};
 
 	/*
-		PathInfo is used to determine the length and number of the shortest path(s) from shadeRoot to each ShadeVector. Once all paths are established, we use
-		computeShadeStrength to set the shadeStrength and shadeVector for all ShadeVectors
+	* Before creating the ShadeVectors, we define PathInfo as a utility for precalculating some of their attributes.
+	* 
+	* The strength of a ShadeVector (shadeStrength) is intended to represent the volume within shade range beyond the unit it points to.
+	* However, the full strength is not always applied, because each ShadeVector can be reached via multiple shortest paths through the tree from shadeRoot,
+	* and, during runtime, some of these paths may be obstructed by other occupied grid units. The shade applied by a ShadeVector should be proportional
+	* to the number of unobstructed paths. To make this happen, we set the length of their shadeVector as shadeStrength divided by the number of shortest
+	* paths. Then, when propagating shade, each of these paths is followed separately, and the shadeVector is only applied if it is clear.
+	* 
+	* Each PathInfo is associated with an individual ShadeVector, and is used to determine the length and number of shortest paths to it so that we can 
+	* precalculate ShadeVectors' shadeVectors accordingly. Once the paths are established, we use computeShadeStrength() to set the shadeStrength and
+	* shadeVector.
 	*/
 	struct PathInfo {
 
 		std::shared_ptr<ShadeVector> sv;
 		double shortestPathLength = std::numeric_limits<double>::infinity();
-		// The number of paths to the shadeIndex, including overlapping paths
+
+		// The number of paths to the ShadeVector, including paths with overlapping segments
 		int totalPaths = 0;
 		std::vector<std::shared_ptr<ShadeVector>> parents;
+
+		// The volume of the unit pointed to by this ShadeVector that lies within the shade range.
+		// This is needed to get an accurate measure of those units that only partially intersect with the shade range.
 		double shadedVolume = 0.;
 
 		PathInfo() {}
@@ -64,11 +77,16 @@ void BlockPointGrid::createIndexVectorTree() {
 			shortestPathLength = newShortestPathLength;
 		}
 
-		// For each element in pathInfos, computes the final shadeStrength and shadeVector for its corresponding ShadeVector.  The shadeVector points from the shadeRoot to 
-		// the unit it shades, and its magnitude is equal to shadeStrength divided by totalPaths.  shadeStrength is trickier to establish.  It represents the total volume of
-		// the portions of its descendant units that it blocks.  For each descendant we have to consider whether it has multiple parents.  For example, if a ShadeVector is the
-		// only parent of a child, then that whole child unit volume is added to the parent's shadeStrength.  If the child had 3 parents, only 1/3 unit volume is added to the parent. 
-		// In the latter scenario, volumes of grandchildren of that child would also be divided by 3 and potentially divided further if they too have multiple parents.
+		/*
+		* Computes the final values of the shadeStrength and shadeVector for each ShadeVector.
+		* 
+		* Each ShadeVector points to a unit that lies between the shadeRoot and some sub-sector within shade range.  The strength of a ShadeVector (shadeStrength)
+		* is intended to represent the volume of this sub-sector, including the volume of the unit it points to.  This is the volume that it 'blocks'. We could
+		* use the formula for the volume of a spherical sector to get a precise value for this, however, when propagating shade, applying more or less of this value
+		* depending on the grid state becomes more complicated. Instead, we will get an approximation to this value by visiting descendant nodes from each ShadeVector
+		* and summing their volumes.  We also consider whether descendants have multiple parents, in which case, only the appropriate fraction of that descendant's
+		* volume is added.
+		*/
 		static void computeShadeStrength(PathInfo* p, double& shadeBelow, std::unordered_map<Point_Int, PathInfo, Point_Int::HashFunction>& pathInfos,
 			std::unordered_set<std::shared_ptr<ShadeVector>>& computed) {
 
@@ -88,7 +106,6 @@ void BlockPointGrid::createIndexVectorTree() {
 				MVector shadeVector = MVector(p->sv->toUnit.x, p->sv->toUnit.y, p->sv->toUnit.z).normal();
 				p->sv->setShadeVectors(shadeVector * (p->sv->shadeStrength / p->totalPaths));
 				computed.insert(p->sv);
-				//MGlobal::displayInfo(MString() + "computed " + p->shadeIndex->toUnit.toMString() + ", strength is " + p->shadeIndex->fullShadeStrength);
 			}
 
 			shadeBelow = p->sv->shadeStrength / p->parents.size();
@@ -96,15 +113,10 @@ void BlockPointGrid::createIndexVectorTree() {
 	};
 
 	/*
-		First we find all ShadeVectors within the cone range and determine which of their neighboring units each blocks.
-
-		- Loop through each ShadeVector once
-			- Loop through each of its neighboring units
-				- Check if the neighbor falls within the spherical sector defined by halfConeAngle and shadeRange
-				- If it does, check if it has been encountered yet (pathInfos is used for this)
-				- If it hasn't been encountered, create a new ShadeVector and pathInfos entry, otherwise, check if the path to it is shorter than the existing and update as needed
-				- Either way, we update the PathInfo of the blocked units.  After the blocked units of all ShadeIndexes in a level have been checked.  The shortest paths
-				  to those units will have been determined
+	* With PathInfo established, we can now create the ShadeVectors
+	* 
+	* This is essentially a breadth-first-search.  Starting with shadeRoot, we use VECTORS_TO_NEIGHBORS to check which neighboring
+	* units lie within shade range, create ShadeVectors which point to those units, and add them to the queue.
 	*/
 	std::queue<std::shared_ptr<ShadeVector>> shadeVectors;
 	shadeVectors.push(shadeRoot);
@@ -141,7 +153,6 @@ void BlockPointGrid::createIndexVectorTree() {
 				MVector fullVectorToNeighbor = neighborIndex.toMVector() * unitSize;
 				double intersectionVolume = getIntersectionWithShadeRange(fullVectorToNeighbor, 3);
 				if (intersectionVolume > 0.) {
-					//MGlobal::displayInfo(MString() + "First encounter for " + neighborIndex.toMString());
 
 					std::shared_ptr<ShadeVector> newShadeIndex = std::make_shared<ShadeVector>(neighborIndex);
 					pathInfos[neighborIndex] = PathInfo(newShadeIndex, fullPathLength, pathInfos[next->toUnit].totalPaths, next, intersectionVolume);
@@ -343,7 +354,7 @@ std::unordered_set<Point_Int, Point_Int::HashFunction> BlockPointGrid::getIndice
 MStatus BlockPointGrid::addBlockPoint(const MPoint loc, double bpDensity, double bpRadius, std::shared_ptr<BlockPoint>& ptrForSeg) {
 
 	Point_Int unitIndex = pointToIndex(loc);
-	//MGlobal::displayInfo(MString() + "The block point at " + loc.toMString() + " is in grid unit " + unitIndex.toMString());
+
 	if (!this->indicesAreInRange_showError(unitIndex.x, unitIndex.y, unitIndex.z))
 		return MS::kFailure;
 
@@ -357,7 +368,7 @@ MStatus BlockPointGrid::addBlockPoint(const MPoint loc, double bpDensity, double
 	newBP->setIndicesInRadius(indicesInRadius);
 
 	for (const auto& i : indicesInRadius) {
-		//MGlobal::displayInfo(MString() + "density: " + std::round(bpDensity));
+
 		GridUnit* unit = &grid[i.x][i.y][i.z];
 		unit->adjustDensityIncludingExcess(add * static_cast<int>(std::round(bpDensity)));
 		dirtyDensityUnits.insert(unit);
@@ -378,8 +389,8 @@ MStatus BlockPointGrid::moveBlockPoint(BlockPoint& bp, const MPoint newLoc) {
 	Point_Int bpGridIndex = bp.getGridIndex();
 	if (newUnitIndex != bpGridIndex) {
 
-		// Since BlockPoints' radius allows them to affect many units, we must add its movement to the set of indices in its radius and figure out which of the resulting
-		// indices were not in the original set (this results in newSetDiff) as well as which ones in the original set are not in the new set (this results in oldSetDiff).
+		// Since BlockPoints' radius allows them to affect many units, we must add its movement to the set of indices in its radius, then figure out which of the resulting
+		// indices were not in the original set (this results in newSetDiff), as well as which ones in the original set are not in the new set (this results in oldSetDiff).
 		// Only the units within these set differences have changed densities, so only they are used to adjust the grid.
 
 		std::vector<Point_Int> newSetDiff;
@@ -387,18 +398,17 @@ MStatus BlockPointGrid::moveBlockPoint(BlockPoint& bp, const MPoint newLoc) {
 		Point_Int moveVector = newUnitIndex - bpGridIndex;
 		status = addMoveVectorToBP(bp, moveVector, newSetDiff, oldSetDiff);
 		CHECK_MSTATUS_AND_RETURN_IT(status);
-		CHECK_MSTATUS_AND_RETURN_IT(status);
 		bp.setGridIndex(newUnitIndex);
 
 		for (auto& i : oldSetDiff) {
-			//MGlobal::displayInfo(MString() + "old set unit: " + i.toMString());
+
 			GridUnit* unit = &grid[i.x][i.y][i.z];
 			unit->adjustDensityIncludingExcess(subtract * bp.getDensity());
 			dirtyDensityUnits.insert(unit);
 		}
 
 		for (auto& i : newSetDiff) {
-			//MGlobal::displayInfo(MString() + "new set unit: " + i.toMString());
+
 			GridUnit* unit = &grid[i.x][i.y][i.z];
 			unit->adjustDensityIncludingExcess(add * bp.getDensity());
 			dirtyDensityUnits.insert(unit);
@@ -468,9 +478,9 @@ MStatus BlockPointGrid::applyShade() {
 		bool add = densityChange > 0;
 		Point_Int dirtyUnitIndex = u->getGridIndex();
 
-		// A change in density made to this unit affects the shade travelling through it, which is represented by appliedShadeIndices.
-		// Adjust this shade accordingly.  In general if the current unit has become dense, then shade that had been travelling through it is removed.
-		// If it has lost density, then shade that it was blocking is put back.
+		// A change in density made to this unit affects the shade travelling through it, which is represented by the ShadeVectors in appliedShadeIndices.
+		// Adjust this shade accordingly.  In general, if the current unit has become obstructed (density added), then shade that had been travelling through will be removed
+		// and replaced with that emitted from the new shadeRoot.  If it has become unobstructed (density subtracted), then shade that it was blocking is put back.
 		for (const auto& [sv, paths] : u->getAppliedShadeVectors()) {
 
 			status = propagateFrom(sv, paths, dirtyUnitIndex - sv->toUnit, !add);

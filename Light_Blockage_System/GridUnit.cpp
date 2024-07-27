@@ -189,15 +189,14 @@ MStatus GridUnit::setUVsToTile(double transparencyTileMapTileSize, double maxSha
 	}
 
 	int shadePercentageAsInt = static_cast<int>((totalShade / maxShade) * 100);
-	// If shadePercentageAsInt is 0 then the uv tiles won't be calculated right, so just set it to 1.  It's probably better to just not display any shaded units below
-	// 1%, but it could be nice at times just to see how many units are reached.
+	// If shadePercentageAsInt is 0, then the uv tiles won't be calculated right, so just set it to 1 if it is.  It's probably better to just not display
+	// any shaded units below 1%, but it could be nice at times just to see how many units are reached.
 	shadePercentageAsInt = shadePercentageAsInt == 0 ? 1 : shadePercentageAsInt;
 	int uTile = (10 - (shadePercentageAsInt % 10)) % 10;
 	int vTile = (shadePercentageAsInt - 1) / 10;
 	double uCenter = (uTile * .1) + (transparencyTileMapTileSize * .5);
 	double vCenter = (vTile * .1) + (transparencyTileMapTileSize * .5);
 
-	//MGlobal::displayInfo(MString() + "uv tiling info for " + name + " :\tshadePercentageAsInt: " + shadePercentageAsInt + ", uTile " + uTile + ", vTile " + vTile + ", uCenter " + uCenter + ", vCenter " + vCenter);
 	for (unsigned int i = 0; i < uArray.length(); i += 4) {
 
 		// bottom left corner

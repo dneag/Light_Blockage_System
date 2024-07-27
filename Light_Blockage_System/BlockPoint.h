@@ -20,15 +20,19 @@ class BlockPoint : public std::enable_shared_from_this<BlockPoint> {
 
 	MString name;
 	MPoint loc;
+
+	// density was originally intended to allow for values between 0 and 1, so that BlockPoints could partially block the grid units they occupy.
+	// Currently the BlockPointGrid is only designed to handle a density value of 1, meaning BlockPoints fully block the unit(s) they occupy.
 	int density = 1;
 	double radius = 1.;
-	Point_Int gridIndex;
-	MObject bpTransformNode;
 	std::unordered_set<Point_Int, Point_Int::HashFunction> indicesInRadius;
+	Point_Int gridIndex;
+	
 	// For debugging only. Used to trigger moveBlockPoint in callback
 	clock_t timeSinceLastMoved = 0;
 	BlockPointGrid* grid = nullptr;
 	Point_Int currentUnit = Point_Int(0, 0, 0);
+	MObject bpTransformNode;
 
 public:
 

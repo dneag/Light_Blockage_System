@@ -6,167 +6,41 @@ BlockPointGrid.cpp
 #include <map>
 #include "BlockPointGrid.h"
 
-void BlockPointGrid::createIndexVectorTree() {
+void BlockPointGrid::createShadeVectorTree() {
 
-	// Index vectors to neighboring units on sides and below, including diagonals.  Note that the order of these is significant as it is the order that
-	// we will search for units blocked by another unit.
-	std::vector<Point_Int> VECTORS_TO_NEIGHBORS = {
-		{0,-1,0},
-		{-1,0,-1},
-		{-1,0,1},
-		{1,0,-1},
-		{1,0,1},
-		{-1,-1,-1},
-		{-1,-1,1},
-		{1,-1,-1},
-		{1,-1,1},
-		{-1,0,0},
-		{0,0,-1},
-		{0,0,1},
-		{1,0,0},
-		{-1,-1,0},
-		{0,-1,-1},
-		{0,-1,1},
-		{1,-1,0}
-	};
+	MGlobal::displayInfo(MString() + "*** Entered createShadeVectorTree ***");
+	MStatus status;
 
-	/*
-	* Before creating the ShadeVectors, we define PathInfo as a utility for precalculating some of their attributes.
-	* 
-	* The strength of a ShadeVector (shadeStrength) is intended to represent the volume within shade range beyond the unit it points to.
-	* However, the full strength is not always applied, because each ShadeVector can be reached via multiple shortest paths through the tree from shadeRoot,
-	* and, during runtime, some of these paths may be obstructed by other occupied grid units. The shade applied by a ShadeVector should be proportional
-	* to the number of unobstructed paths. To make this happen, we set the length of their shadeVector as shadeStrength divided by the number of shortest
-	* paths. Then, when propagating shade, each of these paths is followed separately, and the shadeVector is only applied if it is clear.
-	* 
-	* Each PathInfo is associated with an individual ShadeVector, and is used to determine the length and number of shortest paths to it so that we can 
-	* precalculate ShadeVectors' shadeVectors accordingly. Once the paths are established, we use computeShadeStrength() to set the shadeStrength and
-	* shadeVector.
-	*/
-	struct PathInfo {
+	// Precalculate subdivision size and volume. There will be 8^timesToSubDivide subdivisions for each unit. 
+	int timesToSubDivide = 3;
+	double subdivisionSize = unitSize * std::pow(.5, timesToSubDivide);
+	double subdivisionVolume = std::pow(subdivisionSize, 3);
 
-		std::shared_ptr<ShadeVector> sv;
-		double shortestPathLength = std::numeric_limits<double>::infinity();
+	// Key:  ShadeVector
+	// Value:  The subdivisions within the ShadeVector's unit
+	std::unordered_map< ShadeVector*, std::vector<MVector>> subdivisionsByUnit;
 
-		// The number of paths to the ShadeVector, including paths with overlapping segments
-		int totalPaths = 0;
-		std::vector<std::shared_ptr<ShadeVector>> parents;
+	// Key:  ShadeVector
+	// Value:  Locations of all subdivisions for the ShadeVector
+	std::unordered_map<ShadeVector*, std::vector<MVector>> totalOccludedVolumesByShadeVectors;
 
-		// The volume of the unit pointed to by this ShadeVector that lies within the shade range.
-		// This is needed to get an accurate measure of those units that only partially intersect with the shade range.
-		double shadedVolume = 0.;
+	MGlobal::displayInfo(MString() + "*** Finding ShadeVectors and their subdivisions ***");
 
-		PathInfo() {}
+	// Find all shade vectors in shade range and populate the two maps
+	findAllShadeVectorSubdivisions(subdivisionsByUnit, totalOccludedVolumesByShadeVectors, subdivisionVolume, timesToSubDivide);
 
-		PathInfo(std::shared_ptr<ShadeVector> sv, double shortestPathLength, int totalPaths, std::shared_ptr<ShadeVector> incomingFrom, double shadedVolume)
-			: sv(sv), shortestPathLength(shortestPathLength), totalPaths(totalPaths), shadedVolume(shadedVolume) {
+	std::unordered_set<ShadeVector*> done;
+	MGlobal::displayInfo(MString() + "*** Finding volume blocked ***");
 
-			parents.push_back(incomingFrom);
-		}
+	// Compute the total volume occluded by each ShadeVector as well as that shared by neighbors. 
+	findAllShadedVolume(shadeRoot.get(), subdivisionsByUnit, totalOccludedVolumesByShadeVectors, done, subdivisionVolume, subdivisionSize);
 
-		void replaceIncoming(double newShortestPathLength, std::shared_ptr<ShadeVector> newBlocker, int totalPaths) {
+	// Adjust the value of the volume that ShadeVectors share with their neighbors so it is more accurate
+	finalizeSharedVolumeBlocked();
 
-			for (auto& si : parents) {
-
-				si->eraseBlockee(sv);
-			}
-
-			this->totalPaths = totalPaths;
-			parents.clear();
-			parents.push_back(newBlocker);
-			shortestPathLength = newShortestPathLength;
-		}
-
-		/*
-		* Computes the final values of the shadeStrength and shadeVector for each ShadeVector.
-		* 
-		* Each ShadeVector points to a unit that lies between the shadeRoot and some sub-sector within shade range.  The strength of a ShadeVector (shadeStrength)
-		* is intended to represent the volume of this sub-sector, including the volume of the unit it points to.  This is the volume that it 'blocks'. We could
-		* use the formula for the volume of a spherical sector to get a precise value for this, however, when propagating shade, applying more or less of this value
-		* depending on the grid state becomes more complicated. Instead, we will get an approximation to this value by visiting descendant nodes from each ShadeVector
-		* and summing their volumes.  We also consider whether descendants have multiple parents, in which case, only the appropriate fraction of that descendant's
-		* volume is added.
-		*/
-		static void computeShadeStrength(PathInfo* p, double& shadeBelow, std::unordered_map<Point_Int, PathInfo, Point_Int::HashFunction>& pathInfos,
-			std::unordered_set<std::shared_ptr<ShadeVector>>& computed) {
-
-			for (auto& blockee : p->sv->blockedShadeVectors) {
-
-				computeShadeStrength(&pathInfos[blockee->toUnit], shadeBelow, pathInfos, computed);
-
-				if (computed.find(p->sv) == computed.end())
-					p->sv->shadeStrength += shadeBelow;
-
-				shadeBelow = 0.;
-			}
-
-			if (computed.find(p->sv) == computed.end()) {
-
-				p->sv->shadeStrength += p->shadedVolume;
-				MVector shadeVector = MVector(p->sv->toUnit.x, p->sv->toUnit.y, p->sv->toUnit.z).normal();
-				p->sv->setShadeVectors(shadeVector * (p->sv->shadeStrength / p->totalPaths));
-				computed.insert(p->sv);
-			}
-
-			shadeBelow = p->sv->shadeStrength / p->parents.size();
-		}
-	};
-
-	/*
-	* With PathInfo established, we can now create the ShadeVectors
-	* 
-	* This is essentially a breadth-first-search.  Starting with shadeRoot, we use VECTORS_TO_NEIGHBORS to check which neighboring
-	* units lie within shade range, create ShadeVectors which point to those units, and add them to the queue.
-	*/
-	std::queue<std::shared_ptr<ShadeVector>> shadeVectors;
-	shadeVectors.push(shadeRoot);
-	std::unordered_map<Point_Int, PathInfo, Point_Int::HashFunction> pathInfos;
-	pathInfos[Point_Int(0, 0, 0)] = PathInfo(shadeRoot, 0., 1, nullptr, 0.);
-
-	while (!shadeVectors.empty()) {
-
-		std::shared_ptr<ShadeVector> next = shadeVectors.front();
-		shadeVectors.pop();
-
-		for (const auto& toNeighbor : VECTORS_TO_NEIGHBORS) {
-
-			Point_Int neighborIndex = next->toUnit + toNeighbor;
-			double fullPathLength = pathInfos[next->toUnit].shortestPathLength + (toNeighbor.toMVector() * unitSize).length();
-
-			if (pathInfos.find(neighborIndex) != pathInfos.end()) {
-
-				if (almostEqual(fullPathLength, pathInfos[neighborIndex].shortestPathLength)) {
-
-					next->blockedShadeVectors.push_back(pathInfos[neighborIndex].sv);
-					pathInfos[neighborIndex].parents.push_back(next);
-					pathInfos[neighborIndex].totalPaths += pathInfos[next->toUnit].totalPaths;
-
-				}
-				else if (fullPathLength < pathInfos[neighborIndex].shortestPathLength) {
-
-					pathInfos[neighborIndex].replaceIncoming(fullPathLength, next, pathInfos[next->toUnit].totalPaths);
-					next->blockedShadeVectors.push_back(pathInfos[neighborIndex].sv);
-				}
-			}
-			else {
-
-				MVector fullVectorToNeighbor = neighborIndex.toMVector() * unitSize;
-				double intersectionVolume = getIntersectionWithShadeRange(fullVectorToNeighbor, 3);
-				if (intersectionVolume > 0.) {
-
-					std::shared_ptr<ShadeVector> newShadeIndex = std::make_shared<ShadeVector>(neighborIndex);
-					pathInfos[neighborIndex] = PathInfo(newShadeIndex, fullPathLength, pathInfos[next->toUnit].totalPaths, next, intersectionVolume);
-					next->blockedShadeVectors.push_back(newShadeIndex);
-					shadeVectors.push(newShadeIndex);
-					maximumShade += intersectionVolume;
-				}
-			}
-		}
-	}
-
-	double shadeBelow = 0.;
-	std::unordered_set<std::shared_ptr<ShadeVector>> computed;
-	PathInfo::computeShadeStrength(&pathInfos[Point_Int(0, 0, 0)], shadeBelow, pathInfos, computed);
+	// Uncomment the following line to display the range of the shade vector tree.  Each unit represents a ShadeVector and will have
+	// channels indicating the amount of shared volume for each of its child ShadeVectors
+	//displayShadeVectorUnitsByLevel(subdivisionSize, totalOccludedVolumesByShadeVectors);
 }
 
 MStatus BlockPointGrid::initiateGrid() {
@@ -235,34 +109,6 @@ MStatus BlockPointGrid::initiateGrid() {
 	MPlug templateDisplayPlug = gridBorderFn.findPlug("template", true, &status);
 	templateDisplayPlug.setValue(true);
 
-	// Find any Maya materials (shading groups) we have set up and assign them to their corresponding handles
-	std::map<MObject*, MString> expectedShadingGroups;
-	expectedShadingGroups[&transparencyMaterialShadingGroup] = "shadePercentageMat";
-	expectedShadingGroups[&defaultShadingGroup] = "lambert1";
-	MItDependencyNodes it(MFn::kShadingEngine);
-	for (; !it.isDone(); it.next()) {
-		MFnDependencyNode shadingGroup(it.thisNode());
-		MPlug surfaceShaderPlug = shadingGroup.findPlug("surfaceShader", true);
-		MPlugArray connectedPlugs;
-		surfaceShaderPlug.connectedTo(connectedPlugs, true, false);
-		for (unsigned int i = 0; i < connectedPlugs.length(); ++i) {
-
-			MFnDependencyNode materialNode(connectedPlugs[i].node());
-
-			for (auto& [sg, materialName] : expectedShadingGroups) {
-
-				if (materialNode.name() == materialName)
-					*sg = shadingGroup.object();
-			}
-		}
-	}
-
-	for (auto& [sg, materialName] : expectedShadingGroups) {
-
-		if ((*sg).isNull())
-			MGlobal::displayError("Shading group not found for material: " + materialName);
-	}
-
 	return MS::kSuccess;
 }
 
@@ -287,7 +133,8 @@ BlockPointGrid::BlockPointGrid(int id, double XSIZE, double YSIZE, double ZSIZE,
 	halfConeAngle = CONERANGEANGLE;
 	intensity = INTENSITY;
 
-	createIndexVectorTree();
+	setShadingGroups();
+	createShadeVectorTree();
 	initiateGrid();
 
 	MGlobal::displayInfo(MString() + "Grid created with " + (xElements * yElements * zElements) + " units.");
@@ -298,7 +145,7 @@ BlockPointGrid::BlockPointGrid(int id, double XSIZE, double YSIZE, double ZSIZE,
 	MGlobal::displayInfo(MString() + "	shadeRange: " + shadeRange);
 	MGlobal::displayInfo(MString() + "	halfConeAngle: " + halfConeAngle);
 	MGlobal::displayInfo(MString() + "	intensity: " + intensity);
-	MGlobal::displayInfo(MString() + "	maximumShade: " + maximumShade);
+	MGlobal::displayInfo(MString() + "	maxVolumeBlocked: " + maxVolumeBlocked);
 
 	// Clear any selection
 	MGlobal::executeCommand(MString() + "select -cl -sym");
@@ -472,86 +319,103 @@ MStatus BlockPointGrid::applyShade() {
 		u->checkDensity(status);
 
 		int densityChange = u->updateDensity();
+
 		if (std::abs(densityChange) == 0)
 			continue;
+
+		u->setArrowDensityPlug();
 
 		bool add = densityChange > 0;
 		Point_Int dirtyUnitIndex = u->getGridIndex();
 
-		// A change in density made to this unit affects the shade travelling through it, which is represented by the ShadeVectors in appliedShadeIndices.
-		// Adjust this shade accordingly.  In general, if the current unit has become obstructed (density added), then shade that had been travelling through will be removed
-		// and replaced with that emitted from the new shadeRoot.  If it has become unobstructed (density subtracted), then shade that it was blocking is put back.
-		for (const auto& [sv, paths] : u->getAppliedShadeVectors()) {
+		// A change in density made to this unit affects the shade travelling through it, which is represented by appliedShadeIndices.
+		// So, before applying the shade resulting from the density change in this unit, adjust the existing shade accordingly.  If this unit has
+		// become dense, then shade that had been travelling through it is removed. If it has lost density, then shade that it was blocking is put back.
+		for (const auto& [sv, percentage] : u->getAppliedShadeVectors()) {
+			//if (u->xIndex == 16 && u->zIndex == 16 && (u->yIndex < 5 && u->yIndex > 0)) {
+			//MString action = add ? "Removing" : "Putting back";
+			//MGlobal::displayInfo(MString() + action + " below occupant: " + occupant.first->toUnit.toMString());
 
-			status = propagateFrom(sv, paths, dirtyUnitIndex - sv->toUnit, !add);
+			status = propagateFrom(sv, dirtyUnitIndex - sv->toUnit, percentage, !add);
 			CHECK_MSTATUS_AND_RETURN_IT(status);
 		}
 
-		status = propagateFrom(shadeRoot.get(), 1, dirtyUnitIndex, add);
+		status = propagateFrom(shadeRoot.get(), dirtyUnitIndex, 1., add);
 		CHECK_MSTATUS_AND_RETURN_IT(status);
+
 		u->setBlocked(add);
 	}
 
 	dirtyDensityUnits.clear();
-	updateAllUnitsLightDirection();
+	updateAllUnitsLightConditions();
 
 	return MS::kSuccess;
 }
 
-MStatus BlockPointGrid::propagateFrom(ShadeVector* startingShadeIndex, std::size_t convergedPaths, Point_Int blockerIndex, bool add) {
+MStatus BlockPointGrid::propagateFrom(ShadeVector* startShadeVector, Point_Int blockerIndex, double startingPercentage, bool add) {
 
-	std::queue<std::shared_ptr<ShadeVector>> svs;
-	std::unordered_set<std::shared_ptr<ShadeVector>> encountered;
+	MStatus status;
 
-	// Note that startingShadeIndex is not applied.  We start with its children.
-	startingShadeIndex->getBlocked(svs, encountered, convergedPaths);
+	std::vector<SvRelay> thisLevel;
+	for (auto& n : startShadeVector->neighborShadeVectors)
+		thisLevel.push_back({ n.neighbor.get(), n.percentShared * startingPercentage });
 
-	while (!svs.empty()) {
+	// encountered keeps track of which ShadeVectors have been added to thisLevel so that we can keep them unique.  It also records the position
+	// of each in thisLevel so that we can quickly access and modify them when needed.
+	std::unordered_map<std::shared_ptr<ShadeVector>, std::size_t> encountered;
 
-		ShadeVector& next = *svs.front();
+	while (!thisLevel.empty()) {
 
-		// Get the index of the grid unit pointed to by this sv
-		int X = blockerIndex.x + next.toUnit.x;
-		int Y = blockerIndex.y + next.toUnit.y;
-		int Z = blockerIndex.z + next.toUnit.z;
+		std::vector<SvRelay> nextLevel;
 
-		if (indicesAreOnGrid(X, Y, Z)) {
+		for (auto& relay : thisLevel) {
 
-			GridUnit& unit = grid[X][Y][Z];
+			ShadeVector& next = *relay.sv;
 
-			if (add) {
+			int X = blockerIndex.x + next.toUnit.x;
+			int Y = blockerIndex.y + next.toUnit.y;
+			int Z = blockerIndex.z + next.toUnit.z;
 
-				unit.applyShadeVector(next);
+			if (indicesAreOnGrid(X, Y, Z)) {
+
+				GridUnit& unit = grid[X][Y][Z];
+
+				if (add) {
+
+					unit.applyShadeVector(&relay);
+				}
+				else {
+
+					unit.unapplyShadeVector(&relay);
+				}
+
+				if (!unit.isBlocked()) {
+					next.getNeighbors(nextLevel, encountered, relay.cumulativePercentage);
+				}
+
+				dirtyUnits.insert(&unit);
 			}
-			else {
-
-				unit.unapplyShadeVector(next);
-			}
-
-			if (!unit.isBlocked())
-				next.getBlocked(svs, encountered, next.convergedPaths);
-
-			dirtyUnits.insert(&unit);
 		}
 
-		svs.pop();
+		thisLevel = std::move(nextLevel);
+		encountered.clear();
 	}
 
 	return MS::kSuccess;
 }
 
-void BlockPointGrid::updateAllUnitsLightDirection() {
+void BlockPointGrid::updateAllUnitsLightConditions() {
 
 	for (auto& unit : dirtyUnits) {
 
-		unit->updateLightDirection(intensity, maximumShade, unblockedLightDirection);
+		unit->updateLightConditions(intensity, maxVolumeBlocked, unblockedLightDirection);
 
 		displayAffectedUnitArrowIf(*unit);
 
 		if (!displayShadedUnitArrows && unit->arrowMeshIsVisible()) {
 
 			unit->updateArrowMesh();
-			unit->setArrowShadePlug(maximumShade);
+			unit->setArrowShadePlug();
 		}
 
 		displayShadedUnitIf(*unit);
@@ -677,6 +541,423 @@ double BlockPointGrid::getIntersectionWithShadeRange(const MVector& vectorToUnit
 	return intersectionVolume;
 }
 
+void BlockPointGrid::findAllShadeVectorSubdivisions(std::unordered_map< ShadeVector*, std::vector<MVector>>& subdivisionsByUnit,
+	std::unordered_map<ShadeVector*, std::vector<MVector>>& totalOccludedVolumesByShadeVectors, double subdivisionVolume, double timesToSubDivide) {
+
+	int subdivisionCount = 0;
+
+	std::vector<MVector> rootSubDivisionsInRange = getSubDivisionsInShadeRange({ 0.,0.,0. }, timesToSubDivide);
+	shadeRoot->volumeInRange = rootSubDivisionsInRange.size() * subdivisionVolume;
+	MGlobal::displayInfo(MString() + "shadeRoot volumeInRange: " + shadeRoot->volumeInRange);
+
+	subdivisionsByUnit[shadeRoot.get()] = rootSubDivisionsInRange;
+	totalOccludedVolumesByShadeVectors[shadeRoot.get()] = rootSubDivisionsInRange;
+
+	std::queue<std::shared_ptr<ShadeVector>> shadeVectors;
+	shadeVectors.push(shadeRoot);
+	std::unordered_map<Point_Int, std::shared_ptr<ShadeVector>, Point_Int::HashFunction> encounteredShadeVectors;
+	encounteredShadeVectors[Point_Int(0, 0, 0)] = shadeRoot;
+	double unitVolume = std::pow(unitSize, 3);
+
+	while (!shadeVectors.empty()) {
+
+		std::shared_ptr<ShadeVector> next = shadeVectors.front();
+		shadeVectors.pop();
+
+		for (const auto& toNeighbor : VECTORS_TO_NEIGHBORS) {
+
+			Point_Int neighborIndex = next->toUnit + toNeighbor;
+
+			if (encounteredShadeVectors.find(neighborIndex) == encounteredShadeVectors.end()) {
+
+				encounteredShadeVectors[neighborIndex] = nullptr; // Mark encountered even the indices out of range so we don't have to redundantly check them
+				MVector fullVectorToNeighbor = neighborIndex.toMVector() * unitSize;
+				std::vector<MVector> subDivisionsInRange = getSubDivisionsInShadeRange(fullVectorToNeighbor, timesToSubDivide);
+
+				if (subDivisionsInRange.size() * subdivisionVolume > unitVolume * .001) {
+
+					std::shared_ptr<ShadeVector> newShadeVector = std::make_shared<ShadeVector>(neighborIndex);
+
+					subdivisionsByUnit[newShadeVector.get()] = subDivisionsInRange;
+					totalOccludedVolumesByShadeVectors[newShadeVector.get()] = subDivisionsInRange;
+					shadeVectors.push(newShadeVector);
+					encounteredShadeVectors[neighborIndex] = newShadeVector;
+					newShadeVector->volumeInRange = subDivisionsInRange.size() * subdivisionVolume;
+					/*MGlobal::displayInfo(MString() + "Added new ShadeVector at " + neighborIndex.toMString() + ". subDivisionsInRange: " + subDivisionsInRange.size()
+						+ ", volumeInRange: " + newShadeVector->volumeInRange);*/
+				}
+			}
+
+			// Here we check if next is between the neighbor and the shade root.  If it is, then the neighbor is added
+			// since some portion of it will be in next's shade
+			if (encounteredShadeVectors[neighborIndex]) { // If the neighbor is in shade range
+
+				// If all three of the neighbor's dimensions are >= the current's, then next is between some portion of it
+				if (std::abs(neighborIndex.x) >= std::abs(next->toUnit.x)
+					&& std::abs(neighborIndex.y) >= std::abs(next->toUnit.y)
+					&& std::abs(neighborIndex.z) >= std::abs(next->toUnit.z)) {
+
+					next->neighborShadeVectors.push_back({ encounteredShadeVectors[neighborIndex], 0., 0. });
+				}
+			}
+		}
+	}
+}
+
+void BlockPointGrid::findAllShadedVolume(ShadeVector* shadeVector,
+	std::unordered_map< ShadeVector*, std::vector<MVector>>& subdivisionsByUnit,
+	std::unordered_map<ShadeVector*, std::vector<MVector>>& totalOccludedVolumesByShadeVectors,
+	std::unordered_set<ShadeVector*>& done, double subdivisionVolume, double subdivisionSize) {
+
+	if (done.find(shadeVector) != done.end())
+		return;
+
+	//MGlobal::displayInfo(MString() + "In findAllShadedVolume3 for " + shadeVector->toUnit.toMString());
+	for (auto& neighbor : shadeVector->neighborShadeVectors) {
+		//MGlobal::displayInfo(MString() + "checking neighbor: " + neighbor.neighbor->toUnit.toMString());
+		findAllShadedVolume(neighbor.neighbor.get(), subdivisionsByUnit, totalOccludedVolumesByShadeVectors, done,
+			subdivisionVolume, subdivisionSize);
+	}
+
+	//MGlobal::displayInfo(MString() + "Computing volume blocked for " + shadeVector->toUnit.toMString());
+
+	shadeVector->volumeBlocked += shadeVector->volumeInRange;
+
+	std::queue<ShadeVector*> extendedNeighbors;
+	std::unordered_set<ShadeVector*> neighborsEncountered;
+	std::vector<std::pair<MVector, MVector>> unitSidesFacingOrigin = getUnitSidesFacingShadeOrigin(*shadeVector);
+
+	// Find the portions of the ShadeVector's adjacent units that lie in the frustrum beyond its unit
+	for (auto& shared : shadeVector->neighborShadeVectors) {
+
+		shadeVector->volumeBlocked += computeShadedVolume(unitSidesFacingOrigin, subdivisionsByUnit[shared.neighbor.get()],
+			totalOccludedVolumesByShadeVectors[shadeVector], subdivisionSize, subdivisionVolume);
+
+		extendedNeighbors.push(shared.neighbor.get());
+		neighborsEncountered.insert(shared.neighbor.get());
+	}
+
+	// Loop through all neighbors' neighbors, adding their intersecting volumes to the sv, until we reach the end of shade range
+	while (!extendedNeighbors.empty()) {
+
+		ShadeVector* nextNeighbor = extendedNeighbors.front();
+		extendedNeighbors.pop();
+
+		for (const auto& neighbor : nextNeighbor->neighborShadeVectors) { // loop through all neighboring ShadeVectors
+
+			if (neighborsEncountered.find(neighbor.neighbor.get()) == neighborsEncountered.end()) {
+
+				shadeVector->volumeBlocked += computeShadedVolume(unitSidesFacingOrigin, subdivisionsByUnit[neighbor.neighbor.get()],
+					totalOccludedVolumesByShadeVectors[shadeVector], subdivisionSize, subdivisionVolume);
+
+				extendedNeighbors.push(neighbor.neighbor.get());
+				neighborsEncountered.insert(neighbor.neighbor.get());
+			}
+		}
+	}
+
+	// The length of the actual shadeVector is equal to the volumeBlocked of the ShadeVector node.  Once that has been calculated we can set the vector
+	shadeVector->shadeVector = shadeVector->toUnit.toMVector().normal() * shadeVector->volumeBlocked;
+
+	for (auto& neighbor : shadeVector->neighborShadeVectors) {
+
+		neighbor.sharedBlockage = findVolumeSharedWithNeighbor(unitSidesFacingOrigin, totalOccludedVolumesByShadeVectors[neighbor.neighbor.get()],
+			subdivisionSize, subdivisionVolume);
+
+		neighbor.percentShared = neighbor.sharedBlockage / neighbor.neighbor->volumeBlocked;
+	}
+
+	if (shadeVector->toUnit == Point_Int(0, 0, 0))
+		maxVolumeBlocked = shadeVector->volumeBlocked;
+
+	done.insert(shadeVector);
+}
+
+double BlockPointGrid::findVolumeSharedWithNeighbor(const std::vector<std::pair<MVector, MVector>>& blockerUnitSidesFacingOrigin,
+	const std::vector<MVector>& shadedSubdivisions, const double subdivisionSize, const double subdivisionVolume) {
+
+	double volume = 0.;
+
+	for (const auto& subdivision : shadedSubdivisions) { // Loop through all subdivisions of the neighbor 
+
+		MVector dir = subdivision.normal(); // Direction to the subdivision
+
+		// Check for intersection with each side
+		for (const auto& [sideNormal, sideCenter] : blockerUnitSidesFacingOrigin) {
+
+			double dotProduct = (dir * sideNormal);
+
+			if (dotProduct < -1e-6) {
+
+				double t = (sideCenter * sideNormal) / dotProduct;
+				MPoint pointOfIntersection = dir * t;
+
+				// The line intersects with the plane the side lies on, but we still need to check if that point of intersection
+				// actually lies within the area of the unit's side.  
+				if (pointOfIntersectionIsOnSide(pointOfIntersection, sideNormal, sideCenter, dir)) {
+
+					volume += subdivisionVolume;
+					break;
+				}
+			}
+		}
+	}
+
+	return volume;
+}
+
+std::vector<std::pair<MVector, MVector>> BlockPointGrid::getUnitSidesFacingShadeOrigin(const ShadeVector& sv) const {
+
+	std::vector<std::pair<MVector, MVector>> unitSidesFacingOrigin;
+	if (sv.toUnit != shadeRoot->toUnit) {
+
+		if (sv.toUnit.x != 0) {
+			double opposite = sv.toUnit.x > 0 ? -1. : 1.;
+			MVector normal = { opposite, 0., 0. };
+			MVector location = (sv.toUnit.toMVector() * unitSize) + (normal * (unitSize * .5));
+			unitSidesFacingOrigin.push_back({ normal, location });
+		}
+
+		if (sv.toUnit.y != 0) {
+			double opposite = sv.toUnit.y > 0 ? -1. : 1.;
+			MVector normal = { 0., opposite, 0. };
+			MVector location = (sv.toUnit.toMVector() * unitSize) + (normal * (unitSize * .5));
+			unitSidesFacingOrigin.push_back({ normal, location });
+		}
+
+		if (sv.toUnit.z != 0) {
+			double opposite = sv.toUnit.z > 0 ? -1. : 1.;
+			MVector normal = { 0., 0., opposite };
+			MVector location = (sv.toUnit.toMVector() * unitSize) + (normal * (unitSize * .5));
+			unitSidesFacingOrigin.push_back({ normal, location });
+		}
+	}
+	else {
+
+		// If this is the shadeRoot, then we have a special case.  Any of its sides that intersect with shade range should be tested
+		// for intersection.  Assuming the shade range angle is never greater than 180 degrees, this will always be all sides except for the top.
+		// Also, note that every subdivision tested is gauranteed to intersect with these, so we could definitely leverage that to improve 
+		// performance.  But doing it this way keeps it consistent with the way other ShadeVectors are calculated and may make the code less error prone.
+		unitSidesFacingOrigin.push_back({ {0., 1., 0.}, {0.,-unitSize * .5, 0.} });
+		unitSidesFacingOrigin.push_back({ {-1., 0., 0.}, { unitSize * .5, 0., 0.} });
+		unitSidesFacingOrigin.push_back({ {0., 0., -1.}, {0.,0., unitSize * .5 } });
+		unitSidesFacingOrigin.push_back({ {1., 0., 0.}, {-unitSize * .5,0., 0.} });
+		unitSidesFacingOrigin.push_back({ {0., 0., 1.}, {0.,0., -unitSize * .5} });
+
+	}
+
+	return unitSidesFacingOrigin;
+}
+
+double BlockPointGrid::computeShadedVolume(const std::vector<std::pair<MVector, MVector>>& blockerUnitSidesFacingOrigin,
+	const std::vector<MVector>& neighborSubdivisions, std::vector<MVector>& subdivisionsInVolume,
+	const double subdivisionSize, const double subdivisionVolume) {
+
+	double volume = 0.;
+
+	for (const auto& subdivision : neighborSubdivisions) { // Loop through all subdivisions of the neighbor 
+
+		MVector dir = subdivision.normal(); // Direction to the subdivision
+
+		// Check for intersection with each side
+		for (const auto& [sideNormal, sideCenter] : blockerUnitSidesFacingOrigin) {
+
+			double dotProduct = (dir * sideNormal);
+
+			/*
+				If the dot product of the side normal and direction to the subd is 0 or very close to it, then the two vectors are about perpendicular,
+				meaning our line is about parallel to the plane and cannot intersect.  This shouldn't be possible since we established that these
+				planes face the origin from which the line to the unit is drawn, but just to be safe...  Also, note we are checking that the dot product
+				is negative, indicating the direction to the subd faces the normal, i.e. the angle between them is greater than 90 degrees.
+			*/
+			if (dotProduct < -1e-6) {
+
+				double t = (sideCenter * sideNormal) / dotProduct;
+				MPoint pointOfIntersection = dir * t;
+
+
+				// The line intersects with the plane the side lies on, but we still need to check if that point of intersection
+				// actually lies within the area of the unit's side.  
+				if (pointOfIntersectionIsOnSide(pointOfIntersection, sideNormal, sideCenter, dir)) {
+
+					volume += subdivisionVolume;
+					subdivisionsInVolume.push_back(subdivision);
+					break;
+				}
+			}
+		}
+	}
+
+	return volume;
+}
+
+bool BlockPointGrid::pointOfIntersectionIsOnSide(const MPoint& pointOfIntersection, const MVector& sideNormal, const MVector& sideCenter, const MVector& ray) const {
+
+	/*
+		A point of intersection with the plane the side lies on has been found, but we still need to check if that point
+		actually lies within the area of the unit's side.  For this, we can get the vector from the side's center
+		to that POI and check whether its dimensions perpendicular to the side's normal are greater than half the unit size.
+		If any of them are, then the poi is not on the side. Note that points on the very edge of sides are considered on the
+		side, which results in overlapping volumes.
+	*/
+
+	MVector centerToPOI = pointOfIntersection - sideCenter;
+	double toEdgeApprox = unitSize * .5 + 1e-6;
+
+	// This commented section will eliminate overlaps (I think...still needs more testing).  Not sure if it's necessary.
+	/*if (almostEqual(sideNormal.y, 0.)) {
+
+		if (std::abs(centerToPOI.y) > toEdgeApprox) {
+			return false;
+		}
+		else if (almostEqual(centerToPOI.y, unitSize * .5)) {
+			return false;
+		}
+	}
+	else {
+
+		if (ray.x > 0 && centerToPOI.x > 0 && almostEqual(centerToPOI.x, unitSize * .5)) {
+			return false;
+		}
+
+		if (ray.x < 0 && centerToPOI.x < 0 && almostEqual(centerToPOI.x, -unitSize * .5)) {
+			return false;
+		}
+	}
+
+	if (ray.z > 0 && centerToPOI.z > 0 && almostEqual(centerToPOI.z, unitSize * .5)) {
+		return false;
+	}
+
+	if (ray.z < 0 && centerToPOI.z < 0 && almostEqual(centerToPOI.z, -unitSize * .5)) {
+		return false;
+	}*/
+
+	if ((almostEqual(sideNormal.x, 0.) && std::abs(centerToPOI.x) > toEdgeApprox)
+		|| (almostEqual(sideNormal.y, 0.) && std::abs(centerToPOI.y) > toEdgeApprox)
+		|| (almostEqual(sideNormal.z, 0.) && std::abs(centerToPOI.z) > toEdgeApprox))
+	{
+		// The POI is not on the side
+		return false;
+	}
+	else {
+		return true;
+	}
+}
+
+void BlockPointGrid::finalizeSharedVolumeBlocked() const {
+
+	// Gather blockedNeighbors
+	std::unordered_map<ShadeVector*, std::vector<std::pair<ShadeVector*, double>>> blockedNeighbors;
+	std::unordered_set<ShadeVector*> encountered;
+	std::queue<ShadeVector*> shadeVectors;
+	shadeVectors.push(shadeRoot.get());
+
+	while (!shadeVectors.empty()) {
+
+		ShadeVector* next = shadeVectors.front();
+		for (auto& shared : next->neighborShadeVectors) {
+
+			blockedNeighbors[shared.neighbor.get()].push_back({ next, shared.sharedBlockage });
+
+			if (encountered.find(shared.neighbor.get()) == encountered.end()) {
+				shadeVectors.push(shared.neighbor.get());
+				encountered.insert(shared.neighbor.get());
+			}
+		}
+
+		shadeVectors.pop();
+	}
+
+	// blockedNeighbors has all ShadeVectors with a corresponding list of ShadeVectors that share some occluded volume
+	for (auto& [blockedNeighbor, blockers] : blockedNeighbors) {
+
+		// Sum up the current volumes
+		double totalSharedBeforeAdjustment = 0.;
+		for (auto& [blocker, blocked] : blockers) {
+
+			totalSharedBeforeAdjustment += blocked;
+		}
+
+		// Take the difference between this total and what it should be
+		double volumeError = totalSharedBeforeAdjustment - blockedNeighbor->volumeBlocked;
+
+		// For each blocker of this blockedNeighbor, subtract an amount of blocked volume proportional to its original amount in
+		// totalBlockedBeforeAdjustment, then set the resulting value for the blocking ShadeVector's corresponding neighbor in neighborShadeVectors
+		for (auto& [blocker, blocked] : blockers) {
+
+			double adjustment = (blocked / totalSharedBeforeAdjustment) * volumeError;
+			blocked -= adjustment;
+			for (auto& neighborShare : blocker->neighborShadeVectors) {
+
+				if (neighborShare.neighbor.get() == blockedNeighbor) {
+
+					neighborShare.sharedBlockage = blocked;
+					neighborShare.percentShared = blocked / blockedNeighbor->volumeBlocked;
+				}
+			}
+		}
+
+		// Test that the final sum is about equal to the neighbor's volume blocked 
+		double finalTotalVolumeBlocked = 0.;
+		double finalTotalPercentageBlocked = 0.;
+		for (auto& [blocker, blocked] : blockers) {
+			for (auto& neighborShared : blocker->neighborShadeVectors) {
+
+				if (neighborShared.neighbor.get() == blockedNeighbor) {
+
+					finalTotalVolumeBlocked += neighborShared.sharedBlockage;
+					finalTotalPercentageBlocked += neighborShared.percentShared;
+				}
+			}
+		}
+
+		if (!almostEqual(finalTotalVolumeBlocked, blockedNeighbor->volumeBlocked)) {
+			MGlobal::displayError(MString() + "Total volume blocked by neighbors of " + blockedNeighbor->toUnit.toMString() + " is " + finalTotalVolumeBlocked
+				+ ".  Should be " + blockedNeighbor->volumeBlocked);
+		}
+
+		if (!almostEqual(finalTotalPercentageBlocked, 1.)) {
+			MGlobal::displayError(MString() + "Total percent blocked by neighbors of " + blockedNeighbor->toUnit.toMString() + " is " + finalTotalPercentageBlocked
+				+ ".  Should be 100%");
+		}
+	}
+}
+
+std::vector<MVector> BlockPointGrid::getSubDivisionsInShadeRange(const MVector& vectorToUnit, int timesToSubDivide) {
+
+	double intersectionVolume = 0.;
+	std::vector<MVector> subdivisions;
+	std::vector<MVector> cubesToDivide = { vectorToUnit };
+	double subDivisionSize = unitSize;
+
+	// This loop will yield a list of centers of cubic subdivisions of the unit.  The number of subdivisions is 8^timesToSubDivide
+	for (int i = 0; i < timesToSubDivide; ++i) {
+
+		subdivisions.clear();
+
+		for (const auto& c : cubesToDivide) {
+
+			divideCubeToEighths(c, subDivisionSize, subdivisions);
+		}
+
+		subDivisionSize *= .5;
+		cubesToDivide = subdivisions;
+	}
+
+	std::vector<MVector> subdivisionsInRange;
+	MVector down = { 0.,-1.,0. };
+	for (const auto& s : subdivisions) {
+
+		if (s.length() < shadeRange && s.angle(down) <= halfConeAngle) {
+
+			subdivisionsInRange.push_back(s);
+		}
+	}
+
+	return subdivisionsInRange;
+}
+
 void BlockPointGrid::divideCubeToEighths(const MVector& cubeCenter, double size, std::vector<MVector>& subdivisions) {
 
 	double q = size * .25;
@@ -739,6 +1020,102 @@ void BlockPointGrid::updateGridAfterBPRemoval(MObject& node, void* clientData) {
 
 	bp->getGrid()->deleteBlockPoint(temp);
 	bp->getGrid()->applyShade();
+}
+
+void BlockPointGrid::displayShadeVectorUnitsByLevel(double subdivisionSize,
+	std::unordered_map<ShadeVector*, std::vector<MVector>>& totalOccludedVolumesByShadeVectors) {
+
+	MStatus status;
+	MFnDagNode svByLevelDagNodeFn;
+	assignTransformForDagFn("ShadeVector_units_by_level", svByLevelDagNodeFn, status);
+	std::unordered_map<ShadeVector*, std::map<std::string, ChannelGroup>> shadeVectorChannels;
+
+	int level = 0;
+	std::unordered_set<ShadeVector*> thisLevel;
+	thisLevel.insert(shadeRoot.get());
+	int subdCounter = 0;
+
+	while (!thisLevel.empty()) {
+
+		MFnDagNode thisLevelDagNodeFn;
+		assignTransformForDagFn("level " + std::to_string(level), thisLevelDagNodeFn, status);
+		MObject thisLevelHandle = thisLevelDagNodeFn.object();
+		svByLevelDagNodeFn.addChild(thisLevelHandle);
+
+		std::unordered_set<ShadeVector*> nextLevel;
+
+		double totalBlockedThisLevel = 0.;
+		for (const auto& sv : thisLevel) {
+
+			MGlobal::displayInfo(MString() + "Level " + level + ": " + sv->toUnit.toMString() + " - " + sv->volumeBlocked);
+
+			totalBlockedThisLevel += sv->volumeBlocked;
+
+			MFnDagNode svGroupDagNodeFn;
+			assignTransformForDagFn("_" + sv->toUnit.toString() + "_group", svGroupDagNodeFn, status);
+			MObject svGroupHandle = svGroupDagNodeFn.object();
+			thisLevelDagNodeFn.addChild(svGroupHandle);
+
+			MObject svUnitCube;
+			createShadeVectorUnitTransform(svUnitCube, sv, svGroupDagNodeFn, shadeVectorChannels);
+
+			bool createSubdivisionMeshes = false;
+
+			if (!svUnitCube.isNull() && createSubdivisionMeshes
+				&& sv->toUnit == Point_Int(0, 0, 0)
+				) {
+
+				MFnDagNode totalSubdsDagNodeFn;
+				assignTransformForDagFn("_" + sv->toUnit.toString() + "_total_subdivisions", totalSubdsDagNodeFn, status);
+				MObject totalSubdsHandle = totalSubdsDagNodeFn.object();
+				svGroupDagNodeFn.addChild(totalSubdsHandle);
+
+				for (const auto& subdivision : totalOccludedVolumesByShadeVectors[sv]) {
+
+					makeSubdMesh(subdivision, subdivisionSize, ++subdCounter, totalSubdsDagNodeFn);
+				}
+			}
+
+			for (const auto& neighbor : sv->neighborShadeVectors) {
+
+				if (nextLevel.find(neighbor.neighbor.get()) == nextLevel.end()) {
+
+					nextLevel.insert(neighbor.neighbor.get());
+				}
+			}
+		}
+
+		MGlobal::displayInfo(MString() + "*** Level " + level + " total: " + totalBlockedThisLevel + " ***");
+
+		thisLevel = nextLevel;
+		level++;
+	}
+}
+
+void BlockPointGrid::createShadeVectorUnitTransform(MObject& handle, ShadeVector* sv, MFnDagNode& debugGroupDagNodeFn,
+	std::unordered_map<ShadeVector*, std::map<std::string, ChannelGroup>>& shadeVectorChannels) {
+
+	std::map<std::string, ChannelGroup> channels;
+	for (auto& shared : sv->neighborShadeVectors) {
+
+		channels[shared.neighbor->toUnit.toString() + "_prcnt"] = { shared.percentShared };
+		channels[shared.neighbor->toUnit.toString() + "_total"] = { shared.sharedBlockage };
+	}
+	channels["totalVolumeBlocked"] = sv->volumeBlocked;
+	handle = SimpleShapes::makeCube(sv->toUnit.toMVector() * unitSize, unitSize, "debug_unit_" + sv->toUnit.toMString(), channels);
+	SimpleShapes::setObjectMaterial(handle, defaultShadingGroup);
+	debugGroupDagNodeFn.addChild(handle);
+
+	shadeVectorChannels[sv] = channels;
+}
+
+void BlockPointGrid::makeSubdMesh(const MVector& subdLoc, double subdSize, int subdCounter, MFnDagNode& parent) {
+
+	std::string subdName = "subd_" + std::to_string(subdLoc.x) + "_" + std::to_string(subdLoc.y) + "_" + std::to_string(subdLoc.z) + "_" + std::to_string(subdCounter);
+	MObject sdTransform = SimpleShapes::makeCube(subdLoc, subdSize, subdName.c_str());
+	SimpleShapes::setObjectMaterial(sdTransform, defaultShadingGroup);
+	parent.addChild(sdTransform);
+	MFnDagNode sdGrpDagNodeFn(sdTransform);
 }
 
 void BlockPointGrid::displayAllBlockPoints(bool d) {
@@ -816,13 +1193,13 @@ void BlockPointGrid::displayShadedUnitIf(GridUnit& unit) {
 
 	if (displayShadedUnits) {
 
-		if (unit.getTotalShade() / maximumShade >= displayPercentageThreshhold) {
+		if (unit.getShadePercentage() >= displayPercentageThreshhold) {
 
 			if (unit.getCubeTransformNode().isNull()) 
 				makeUnitCubeMesh(unit);
 
-			unit.setCubeShadePlug(maximumShade);
-			unit.setUVsToTile(transparencyTileMapTileSize, maximumShade, uvOffSet);
+			unit.setCubeShadePlug();
+			unit.setUVsToTile(transparencyTileMapTileSize, maxVolumeBlocked, uvOffSet);
 			unit.setCubeVisibility(true);
 		}
 		else {
@@ -839,12 +1216,12 @@ void BlockPointGrid::displayAffectedUnitArrowIf(GridUnit& unit) {
 
 	if (displayShadedUnitArrows) {
 
-		if (unit.getTotalShade() / maximumShade >= displayPercentageThreshhold) {
+		if (unit.getShadePercentage() >= displayPercentageThreshhold) {
 
 			if (unit.getArrowTransformNode().isNull()) 
 				makeUnitArrowMesh(unit);
 
-			unit.setArrowShadePlug(maximumShade);
+			unit.setArrowShadePlug();
 			unit.updateArrowMesh();
 			unit.setArrowVisibility(true);
 		}
@@ -855,6 +1232,37 @@ void BlockPointGrid::displayAffectedUnitArrowIf(GridUnit& unit) {
 	else {
 
 		unit.setArrowVisibility(false);
+	}
+}
+
+void BlockPointGrid::setShadingGroups() {
+
+	// Find any Maya materials (shading groups) we have set up and assign them to their corresponding handles
+	std::map<MObject*, MString> expectedShadingGroups;
+	expectedShadingGroups[&transparencyMaterialShadingGroup] = "shadePercentageMat";
+	expectedShadingGroups[&defaultShadingGroup] = "lambert1";
+	MItDependencyNodes it(MFn::kShadingEngine);
+	for (; !it.isDone(); it.next()) {
+		MFnDependencyNode shadingGroup(it.thisNode());
+		MPlug surfaceShaderPlug = shadingGroup.findPlug("surfaceShader", true);
+		MPlugArray connectedPlugs;
+		surfaceShaderPlug.connectedTo(connectedPlugs, true, false);
+		for (unsigned int i = 0; i < connectedPlugs.length(); ++i) {
+
+			MFnDependencyNode materialNode(connectedPlugs[i].node());
+
+			for (auto& [sg, materialName] : expectedShadingGroups) {
+
+				if (materialNode.name() == materialName)
+					*sg = shadingGroup.object();
+			}
+		}
+	}
+
+	for (auto& [sg, materialName] : expectedShadingGroups) {
+
+		if ((*sg).isNull())
+			MGlobal::displayWarning("Shading group not found for material: " + materialName);
 	}
 }
 

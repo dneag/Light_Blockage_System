@@ -114,7 +114,7 @@ class BlockPointGrid {
 	std::vector<std::shared_ptr<ShadeVector>> toUnitsInShade;
 
 	// The magnitude of the sum of all vectors in CONTACT_VECTORS that are within the shaded sector, times unit size
-	double maximumShade = 0.1;
+	double maxVolumeBlocked = 0.1;
 
 	double attenuationRate = .1;
 
@@ -128,21 +128,79 @@ class BlockPointGrid {
 
 	MStatus initiateGrid();
 
-	// Creates a tree data structure where each node is a ShadeVector.  The root is the shadeRoot member.
-	void createIndexVectorTree();
+	/*
+	* Creates a tree data structure where each node is a ShadeVector.  The root is the shadeRoot member.
+	* Each node has pointers to each ShadeVector pointing to face-adjacent units further from the shadeRoot. For each of these pointers,
+	* there is a corresponding scalar value representing the amount occluded volume the parent shares with the child.  These values are used
+	* for shade propagation. This method calculates an approximation of the occluded volumes by subdividing units and testing each
+	* subdivision for intersection with the potentially blocking ShadeVector / unit
+	*/
+	void createShadeVectorTree();
 
 	// Propagate from the given shade index, either adding or removing shade.  If add is false, then remove.
-	MStatus propagateFrom(ShadeVector* startShadeIndex, std::size_t convergedPaths, Point_Int startUnitIndex, bool add);
+	MStatus propagateFrom(ShadeVector* startShadeVector, Point_Int blockerIndex, double startingPercentage, bool add);
+
+	// Find all ShadeVectors in shade range and add them and their subdivisions to svSubds.  This also sets each ShadeVector's face-adjacent neighbors
+	void findAllShadeVectorSubdivisions(std::unordered_map< ShadeVector*, std::vector<MVector>>& subdivisionsByUnit,
+		std::unordered_map<ShadeVector*, std::vector<MVector>>& totalOccludedVolumesByShadeVectors, double subdivisionVolume, double timesToSubDivide);
+
+	// Finds the centers of all cubic subdivisions of the unit whose center is at vectorToUnit within shade range.  The number
+	// of potential subdivisions is 8^timesToDivide
+	std::vector<MVector> getSubDivisionsInShadeRange(const MVector& vectorToUnit, int timesToDivide);
+
+	// Calculates the total volume blocked for all ShadeVectors, as well as maxVolumeBlocked (this is the total volume blocked by shadeRoot)
+	// Also does the initial calculation of the amount of occluded volume shared by parents and their children
+	void findAllShadedVolume(ShadeVector* shadeVector,
+		std::unordered_map< ShadeVector*, std::vector<MVector>>& subdivisionsByUnit,
+		std::unordered_map<ShadeVector*, std::vector<MVector>>& totalOccludedVolumesByShadeVectors,
+		std::unordered_set<ShadeVector*>& done, double subdivisionVolume, double subdivisionSize);
+
+	/*
+		We will be drawing a ray from each subdivision of each unit neighboring the sv and checking for intersection with it.
+		We only need to check for intersection with sides of the sv's unit that are facing the shade origin.  These can
+		be determined easily by looking at toUnit.  If a dimension of toUnit has non-zero value, then it may be intersected, in which case
+		we will need the normal of the unit's side facing the shade root in that dimension as well as the point at the center of that side.
+	*/
+	std::vector<std::pair<MVector, MVector>> getUnitSidesFacingShadeOrigin(const ShadeVector& sv) const;
+
+	// Given a blocker ShadeVector, represented with just some of its sides, and the subdivisions of one of the descendant ShadeVector units that it blocks,
+	// calculate the portion of the volume of the descendant that lies in the frustrum beyond the blocker.
+	double computeShadedVolume(const std::vector<std::pair<MVector, MVector>>& blockerUnitSidesFacingOrigin,
+		const std::vector<MVector>& neighborSubdivisions, std::vector<MVector>& subdivisionsInVolume,
+		const double subdivisionSize, const double subdivisionVolume);
+
+	bool pointOfIntersectionIsOnSide(const MPoint& pointOfIntersection, const MVector& sideNorm, const MVector& sideCenter, const MVector& ray) const;
+
+	double findVolumeSharedWithNeighbor(const std::vector<std::pair<MVector, MVector>>& blockerUnitSidesFacingOrigin,
+		const std::vector<MVector>& shadedSubdivisions, const double subdivisionSize, const double subdivisionVolume);
+
+	/*
+	* The initial calculation of the volume a ShadeVector blocks of each of its neighbors will be inaccurate because
+	* of overlap from other ShadeVectors blocking the same neighboring unit.  When a set of ShadeVectors blocks some of the same volume of the same neighboring unit,
+	* the sum of these volumes should add up to that unit's volumeBlocked.  So, to correct this we can sum up the current volumes and find the difference,
+	* then subtract the correct portion of that difference.  The result is more accurate but still not perfect.
+	*/
+	void finalizeSharedVolumeBlocked() const;
 
 	double getIntersectionWithShadeRange(const MVector& vectorToUnit, int timesToDivide) const;
 
 	static void divideCubeToEighths(const MVector& cubeCenter, double size, std::vector<MVector>& subdivisions);
+
+	void displayShadeVectorUnitsByLevel(double subdivisionSize,
+		std::unordered_map<ShadeVector*, std::vector<MVector>>& totalOccludedVolumesByShadeVectors);
+
+	void createShadeVectorUnitTransform(MObject& handle, ShadeVector* sv, MFnDagNode& debugGroupDagNodeFn,
+		std::unordered_map<ShadeVector*, std::map<std::string, ChannelGroup>>& shadeVectorChannels);
+
+	void makeSubdMesh(const MVector& subdLoc, double subdSize, int subdCounter, MFnDagNode& parent);
 
 	// Checks that each index is within the range of the grid and output an error message if not
 	inline bool indicesAreInRange_showError(int x, int y, int z) const;
 
 	// Adds moveVector to each index in indicesInRadius to form a new set of indices in radius.  Also finds the set difference with respect to both new and old index sets
 	MStatus addMoveVectorToBP(BlockPoint& bp, const Point_Int& moveVector, std::vector<Point_Int>& newSetDiff, std::vector<Point_Int>& oldSetDiff);
+
+	void setShadingGroups();
 
 	// Performs a BFS, radiating from bpUnitIndex to any units whose center's distance from bpLoc is less than radius
 	// Consider further optimizing this.  Since the radius doesn't change for a given order, it seems like maybe we can do this only once for each order and store a
@@ -151,6 +209,15 @@ class BlockPointGrid {
 
 	// A list of integer vectors to adjacent units.  Can be used to optimize finding units within a BlockPoint's radius
 	const std::vector<Point_Int> UNIT_NEIGHBOR_DIRECTIONS{ {-1,0,0 }, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1} };
+
+	// Index vectors to neighboring units on sides and below.
+	const std::vector<Point_Int> VECTORS_TO_NEIGHBORS = {
+		{0,-1,0},
+		{-1,0,0},
+		{0,0,-1},
+		{0,0,1},
+		{1,0,0},
+	};
 
 public:
 
@@ -201,6 +268,8 @@ public:
 		return std::find(blockPoints.begin(), blockPoints.end(), bp) != blockPoints.end();
 	}
 
+	void updateAllUnitsLightConditions();
+
 	void updateAllUnitsLightDirection();
 
 	// Applies or unapplies shade from any grid units that have had block points added or removed.
@@ -244,7 +313,7 @@ public:
 
 	void makeUnitCubeMesh(GridUnit& unit) {
 
-		unit.makeUnitCube(unitSize, maximumShade, transparencyMaterialShadingGroup);
+		unit.makeUnitCube(unitSize, transparencyMaterialShadingGroup);
 		MFnDagNode gridGroupDagNodeFn;
 		gridGroupDagNodeFn.setObject(unitCubeMeshGroup);
 		MObject cubeTransform = unit.getCubeTransformNode();
@@ -253,7 +322,7 @@ public:
 
 	void makeUnitArrowMesh(GridUnit& unit) {
 
-		unit.makeUnitArrow(unitSize, maximumShade, defaultShadingGroup);
+		unit.makeUnitArrow(unitSize, defaultShadingGroup);
 		MFnDagNode gridGroupDagNodeFn;
 		gridGroupDagNodeFn.setObject(unitArrowMeshGroup);
 		MObject arrowTransform = unit.getArrowTransformNode();
@@ -271,4 +340,11 @@ public:
 		CHECK_MSTATUS(status);
 	}
 
+	void assignTransformForDagFn(std::string name, MFnDagNode& transformDagFn, MStatus& status) {
+
+		MObject transform = transformDagFn.create("transform", MObject::kNullObj, &status);
+		transformDagFn.setName(name.c_str());
+		transformDagFn.setObject(transform);
+		CHECK_MSTATUS(status);
+	}
 };

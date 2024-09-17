@@ -7,14 +7,39 @@
 
 #include "Point_Int.h"
 
+struct ShadeVector;
+
+// Used to store child ShadeVectors.  Contains a neighboring ShadeVector and the corresponding amount and precentage of its occluded volume that 
+// is also occluded by the parent.
+struct NeighborSharedBlockage {
+
+	std::shared_ptr<ShadeVector> neighbor = nullptr;
+	double sharedBlockage = 0.;
+	double percentShared = 0.;
+};
+
+
+// Holds ShadeVectors as they are gathered to form the nextLevel / thisLevel lists during propagation
+struct SvRelay {
+
+	ShadeVector* sv = nullptr;
+
+	// The cumulative product of the ShadeVector's parents' percentShared as well as the cumulativePercentage from the units they were applied to.
+	double cumulativePercentage = 0.;
+};
+
 /*
 	ShadeVector objects serve as nodes in the tree data structure rooted at the shadeRoot member variable of a BlockPointGrid.
-	Each represents a vector emitted from an obstructed point in space, which when applied to its destination unit, reduces the amount and alters the direction of light.
-	See BlockPointGrid::createShadeIndexTree() for more details.
+	Each represents one of a set of vectors emitted from an obstructed point in space, which when applied to its destination unit,
+	reduces the amount and alters the direction of light in that unit.
 */
 struct ShadeVector {
 
-	double proximity = 0.;
+	// The portion of this unit's volume that is within shade range
+	double volumeInRange = 0.;
+
+	// The volume, within shade range, occluded by the unit this ShadeVector points to
+	double volumeBlocked = 0.;
 
 	// The maximum amount of shade this ShadeIndex can apply to a unit
 	double shadeStrength = 0.;
@@ -34,12 +59,13 @@ struct ShadeVector {
 	// A list of pointers to child ShadeVectors
 	std::vector<std::shared_ptr<ShadeVector>> blockedShadeVectors;
 
+	// A list of pointers to child ShadeVectors
+	std::vector<NeighborSharedBlockage> neighborShadeVectors;
+
 	// The number of converged paths that are propagating with this ShadeVector.
 	int convergedPaths = 1;
 
 	ShadeVector(const Point_Int& toUnit) : toUnit(toUnit) {}
-
-	ShadeVector(const Point_Int& toUnit, double proximity) : toUnit(toUnit), proximity(proximity) {}
 
 	void setShadeVectors(const MVector& v) {
 
@@ -50,6 +76,26 @@ struct ShadeVector {
 	void eraseBlockee(std::shared_ptr<ShadeVector> shadeIndex) {
 
 		blockedShadeVectors.erase(std::remove(blockedShadeVectors.begin(), blockedShadeVectors.end(), shadeIndex), blockedShadeVectors.end());
+	}
+
+	// Used when propagating shade.  Adds children to svRelays, using encountered to ensure they are unique in that list.
+	void getNeighbors(std::vector<SvRelay>& svRelays,
+		std::unordered_map<std::shared_ptr<ShadeVector>, std::size_t>& encountered, double parentPercentage) {
+
+		for (auto& n : neighborShadeVectors) {
+
+			const auto it = encountered.find(n.neighbor);
+			if (it == encountered.end()) {
+
+				encountered.insert({ n.neighbor, svRelays.size() });
+				svRelays.push_back({ n.neighbor.get(), n.percentShared * parentPercentage });
+			}
+			else {
+
+				//shadeVectors[it->second].count++;
+				svRelays[it->second].cumulativePercentage += n.percentShared * parentPercentage;
+			}
+		}
 	}
 
 	// Add child ShadeVector nodes to the queue.  The 'encountered' list will have been reset before each propagation.  If a child has already been 

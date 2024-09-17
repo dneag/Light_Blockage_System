@@ -20,6 +20,24 @@
 
 #include "MathHelper.h"
 
+struct ChannelGroup {
+
+	double initialValue = 0.; // Only used if and when creating the plug
+	MPlug handle;
+
+	ChannelGroup() {}
+
+	ChannelGroup(double initialValue) : initialValue(initialValue) {};
+
+	void setValue(double val) {
+		if (!handle.isNull()) {
+			handle.setLocked(false);
+			handle.setValue(val);
+			handle.setLocked(true);
+		}
+	}
+};
+
 class SimpleShapes {
 
 public:
@@ -27,7 +45,7 @@ public:
 	// Creates a cube and returns the transform object associated with the cube's shape node
 	static MObject makeCube(const MPoint& location, double size, MString name);
 
-	static MObject makeCube(const MPoint& location, double size, MString name, std::map<std::string, double> channels);
+	static MObject makeCube(const MPoint& location, double size, MString name, std::map<std::string, ChannelGroup>& channels);
 
 	static MObject makeBox(const MPoint& center, double xSize, double ySize, double zSize, MString name);
 
@@ -37,7 +55,7 @@ public:
 
 	static MObject makeSphere(const MPoint& location, double radius, std::string name, std::map<std::string, double> channels);
 
-	static void createChannel(MObject obj, MString name, double value);
+	static MPlug createChannel(MObject obj, MString name, double value, int channelNum);
 
 	static void setObjectMaterial(MObject& shapeNode, MObject& shadingGroup);
 

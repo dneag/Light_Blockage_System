@@ -28,7 +28,9 @@ class GridUnit {
 
 	Point_Int gridIndex = { 0, 0, 0 };
 
-	double totalShade = 0.;
+	double totalVolumeBlocked = 0.;
+
+	double shadePercentage = 0.;
 
 	// Unit vector representing the direction towards the most light
 	MVector lightDirection = MVector(0., 1., 0.);
@@ -36,9 +38,9 @@ class GridUnit {
 	// The sum of all shade vectors affecting this unit.  
 	MVector shadeVectorSum = MVector(0., 0., 0.);
 
-	// These represent the shade indices applied to this unit.  The keys are the shade vectors and the values
-	// represent the number of the shade vector's paths that have reached the unit
-	std::unordered_map<ShadeVector*, std::size_t> appliedShadeVectors;
+	// Key: the applied ShadeVector
+	// Note that the percentage is only used at the unit where propagation starts, otherwise the cumulative percentage ShadeVectors is used
+	std::unordered_map<ShadeVector*, double> appliedShadeVectors;
 
 	// The sum of all block points' densities within this unit.  This value can fall outside of the 0 - 1 range, however, when it is used
 	// to block other units it is always clamped between 0 - 1.
@@ -59,6 +61,7 @@ class GridUnit {
 	MObject arrowTransformNode;
 	MObject arrowShapeNode;
 
+	// Handle to the cube mesh for the unit
 	MObject cubeTransformNode;
 	MObject cubeShapeNode;
 
@@ -93,18 +96,19 @@ public:
 	MVector getLightDirection() const { return lightDirection; }
 
 	// Must only be used after blockpoints have been updated for all trees per time loop iteration or after post deformers
-	void updateLightDirection(double intensity, double maxBlockage, const MVector& unblockedLightDirection);
+	void updateLightConditions(double intensity, double maxBlockage, const MVector& unblockedLightDirection);
 
 	MPoint getCenter() const { return center; }
 	void setCenter(MPoint c) { center = c; }
 
-	double getTotalShade() const { return totalShade; }
-	void setTotalShade(double s) { totalShade = s; }
+	double getTotalVolumeBlocked() const { return totalVolumeBlocked; }
 
-	std::unordered_map<ShadeVector*, std::size_t>& getAppliedShadeVectors() { return appliedShadeVectors; }
-	void applyShadeVector(ShadeVector& sv);
+	double getShadePercentage() const { return shadePercentage; }
 
-	MStatus unapplyShadeVector(ShadeVector& sv);
+	std::unordered_map<ShadeVector*, double>& getAppliedShadeVectors() { return appliedShadeVectors; }
+
+	void applyShadeVector(SvRelay* relay);
+	MStatus unapplyShadeVector(SvRelay* relay);
 
 	bool isBlocked() const { return blocked; }
 	void setBlocked(bool b) { blocked = b; }
@@ -135,10 +139,10 @@ public:
 			cubeVisibilityPlug.setValue(v);
 	}
 
-	void setCubeShadePlug(double maxShade) {
+	void setCubeShadePlug() {
 
 		cubeShadePlug.setLocked(false);
-		cubeShadePlug.setValue(totalShade / maxShade);
+		cubeShadePlug.setValue(shadePercentage);
 		cubeShadePlug.setLocked(true);
 	}
 
@@ -152,10 +156,10 @@ public:
 		}
 	}
 
-	void setArrowShadePlug(double maxShade) {
+	void setArrowShadePlug() {
 
 		arrowShadePlug.setLocked(false);
-		arrowShadePlug.setValue(totalShade / maxShade);
+		arrowShadePlug.setValue(shadePercentage);
 		arrowShadePlug.setLocked(true);
 	}
 
@@ -178,12 +182,12 @@ public:
 			return false;
 	}
 
-	void makeUnitArrow(double unitSize, double maxBlockage, MObject& shadingGroup);
+	void makeUnitArrow(double unitSize, MObject& shadingGroup);
 
 	// Check if currentMeshDirection is different than lightDirection and update it if necessary
 	MStatus updateArrowMesh();
 
-	MStatus makeUnitCube(double unitSize, double maxBlockage, MObject& shadingGroup);
+	MStatus makeUnitCube(double unitSize, MObject& shadingGroup);
 
 	MStatus setUVsToTile(double transparencyTileMapTileSize, double maxShade, double uvOffset) const;
 };

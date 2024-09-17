@@ -1,13 +1,13 @@
 
 #include "SimpleShapes.h"
 
-MObject SimpleShapes::makeCube(const MPoint& location, double size, MString name, std::map<std::string, double> channels) {
+MObject SimpleShapes::makeCube(const MPoint& location, double size, MString name, std::map<std::string, ChannelGroup>& channels) {
 
 	MObject cube = makeCube(location, size, name);
+	int channelNum = 0;
+	for (auto& [name, cGrp] : channels)
+		cGrp.handle = createChannel(cube, name.c_str(), cGrp.initialValue, ++channelNum);
 
-	for (const auto& [key, value] : channels) {
-		createChannel(cube, key.c_str(), value);
-	}
 	MFnDagNode nodeFn;
 	nodeFn.setObject(cube);
 
@@ -163,8 +163,9 @@ MObject SimpleShapes::makeSphere(const MPoint& location, double radius, std::str
 
 	MObject sphere = makeSphere(location, radius, name);
 
+	int channelNum = 0;
 	for (const auto& [key, value] : channels) {
-		createChannel(sphere, key.c_str(), value);
+		createChannel(sphere, key.c_str(), value, ++channelNum);
 	}
 
 	return sphere;
@@ -314,7 +315,7 @@ MObject SimpleShapes::makeSphere(const MPoint& location, double radius, std::str
 void SimpleShapes::setObjectMaterial(MObject& shapeNode, MObject& shadingGroup) {
 
 	if (shadingGroup.isNull()) {
-		//MGlobal::displayError(MString() + "Shading group not found: " + MFnDagNode(shadingGroup).name());
+		MGlobal::displayError(MString() + "Shading group not found: " + MFnDagNode(shadingGroup).name());
 		return;
 	}
 
@@ -326,26 +327,31 @@ void SimpleShapes::setObjectMaterial(MObject& shapeNode, MObject& shadingGroup) 
 	MGlobal::executeCommand("catch(`sets -edit -forceElement " + fnSet.name() + " " + MFnDagNode(shapeNode).fullPathName() + "`);", false, false);
 }
 
-void SimpleShapes::createChannel(MObject obj, MString name, double value) {
+MPlug SimpleShapes::createChannel(MObject obj, MString name, double value, int channelNum) {
+
+	MStatus status;
 
 	if (name.length() < 2)
 		MGlobal::displayInfo(MString() + __FUNCTION__ + " Warning: channel name has less than 2 chars: " + name);
 
 	// Create channels for Unit Density and Unit Blockage and get handles to each
-	MFnDependencyNode arrowFn(obj);
+	MFnDependencyNode objFn(obj);
 	MFnNumericAttribute attrFn;
-	MObject attr = attrFn.create(name, name.substring(0, 1), MFnNumericData::kFloat);
+	std::string briefName = "c_" + std::to_string(channelNum);
+	MObject attr = attrFn.create(name, briefName.c_str(), MFnNumericData::kFloat, status);
 	attrFn.setKeyable(true);
 	attrFn.setStorable(true);
 	attrFn.setWritable(true);
 	attrFn.setReadable(true);
-	arrowFn.addAttribute(attr);
+	objFn.addAttribute(attr);
 
-	MPlug plg = arrowFn.findPlug(attr, true);
+	MPlug plg = objFn.findPlug(attr, true);
 
 	plg.setLocked(false);
 	plg.setValue(value);
 	plg.setLocked(true);
+
+	return plg;
 }
 
 void SimpleShapes::unlockRotates(MString objName) {

@@ -8,7 +8,7 @@ class GUI:
 
         self.windowName = "light_blockage_tester_window"
         self.guiWidth = 413
-        self.createGridFlagsDefault = "un=.4, xs=13., ys=20., zs=13., b=[0,-1.,0],r=2.5,hca=.85,i=2"
+        self.createGridFlagsDefault = "un=.4, xs=13., ys=20., zs=13., b=[0,-1.,0],r=1.5,hca=1.1,i=2"
         self.clearExistingGUI()
 
         self.mainWindow_uiID = cmds.window(self.windowName, title="Light Blockage Tester", w=self.guiWidth)

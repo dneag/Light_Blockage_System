@@ -49,24 +49,4 @@ public:
 	Space(SphAngles angles);
 
 	MVector makeVector(double polar, double azimuth, double distance) const;
-
-	/*void rotateSpace(SphAngles angles);
-
-	void rotateSpaceAndInvertMatrix(double pRot, double aRot);
-
-	void createMatrixFromVectors(const CVect& v1, const CVect& v2);
-
-	void createMatrixFromUnitVectors(const CVect& v1, const CVect& v2);
-
-	MVector makeVector(double polar, double azimuth, double distance) const;
-
-	CVect makeCVect(double polar, double azimuth, double distance) const;
-
-	CVect getVectorFromVectorMatrix(const CVect& v);
-
-	double getRelativeAzimuth(const CVect& vect);
-
-	double getRelativeAzimuth(double vect[3]);
-
-	double getRelativePolar(const CVect& vect);*/
 };

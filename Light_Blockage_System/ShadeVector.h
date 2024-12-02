@@ -29,7 +29,7 @@ struct SvRelay {
 };
 
 /*
-	ShadeVector objects serve as nodes in the tree data structure rooted at the shadeRoot member variable of a BlockPointGrid.
+	ShadeVector objects serve as nodes in the graph data structure rooted at the shadeRoot member variable of a BlockPointGrid.
 	Each represents one of a set of vectors emitted from an obstructed point in space, which when applied to its destination unit,
 	reduces the amount and alters the direction of light in that unit.
 */
@@ -45,7 +45,7 @@ struct ShadeVector {
 	double shadeStrength = 0.;
 
 	// A vector pointing from the shadeRoot to the unit this ShadeVector shades. The length of this vector is shadeStrength divided by the number of paths available 
-	// through the tree to reach the shaded unit
+	// through the graph to reach the shaded unit
 	MVector shadeVector = MVector(0., 0., 0.);
 
 	// The shadeVector multiplied by the number of times this ShadeVector's or any parent ShadeVector's paths have converged

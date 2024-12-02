@@ -129,13 +129,13 @@ class BlockPointGrid {
 	MStatus initiateGrid();
 
 	/*
-	* Creates a tree data structure where each node is a ShadeVector.  The root is the shadeRoot member.
+	* Creates a directed acyclic graph where each node is a ShadeVector.  The root is the shadeRoot member.
 	* Each node has pointers to each ShadeVector pointing to face-adjacent units further from the shadeRoot. For each of these pointers,
 	* there is a corresponding scalar value representing the amount occluded volume the parent shares with the child.  These values are used
 	* for shade propagation. This method calculates an approximation of the occluded volumes by subdividing units and testing each
 	* subdivision for intersection with the potentially blocking ShadeVector / unit
 	*/
-	void createShadeVectorTree();
+	void createShadeVectorGraph();
 
 	// Propagate from the given shade index, either adding or removing shade.  If add is false, then remove.
 	MStatus propagateFrom(ShadeVector* startShadeVector, Point_Int blockerIndex, double startingPercentage, bool add);

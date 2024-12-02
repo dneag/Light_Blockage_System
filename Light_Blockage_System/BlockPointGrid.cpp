@@ -6,9 +6,9 @@ BlockPointGrid.cpp
 #include <map>
 #include "BlockPointGrid.h"
 
-void BlockPointGrid::createShadeVectorTree() {
+void BlockPointGrid::createShadeVectorGraph() {
 
-	MGlobal::displayInfo(MString() + "*** Entered createShadeVectorTree ***");
+	MGlobal::displayInfo(MString() + "*** Entered createShadeVectorGraph ***");
 	MStatus status;
 
 	// Precalculate subdivision size and volume. There will be 8^timesToSubDivide subdivisions for each unit. 
@@ -17,7 +17,7 @@ void BlockPointGrid::createShadeVectorTree() {
 	double subdivisionVolume = std::pow(subdivisionSize, 3);
 
 	// Key:  ShadeVector
-	// Value:  The subdivisions within the ShadeVector's unit
+	// Value:  Locations of the subdivisions within the ShadeVector's unit
 	std::unordered_map< ShadeVector*, std::vector<MVector>> subdivisionsByUnit;
 
 	// Key:  ShadeVector
@@ -29,16 +29,16 @@ void BlockPointGrid::createShadeVectorTree() {
 	// Find all shade vectors in shade range and populate the two maps
 	findAllShadeVectorSubdivisions(subdivisionsByUnit, totalOccludedVolumesByShadeVectors, subdivisionVolume, timesToSubDivide);
 
-	std::unordered_set<ShadeVector*> done;
 	MGlobal::displayInfo(MString() + "*** Finding volume blocked ***");
 
 	// Compute the total volume occluded by each ShadeVector as well as that shared by neighbors. 
+	std::unordered_set<ShadeVector*> done;
 	findAllShadedVolume(shadeRoot.get(), subdivisionsByUnit, totalOccludedVolumesByShadeVectors, done, subdivisionVolume, subdivisionSize);
 
 	// Adjust the value of the volume that ShadeVectors share with their neighbors so it is more accurate
 	finalizeSharedVolumeBlocked();
 
-	// Uncomment the following line to display the range of the shade vector tree.  Each unit represents a ShadeVector and will have
+	// Uncomment the following line to display the range of the shade vector graph.  Each unit represents a ShadeVector and will have
 	// channels indicating the amount of shared volume for each of its child ShadeVectors
 	//displayShadeVectorUnitsByLevel(subdivisionSize, totalOccludedVolumesByShadeVectors);
 }
@@ -134,7 +134,7 @@ BlockPointGrid::BlockPointGrid(int id, double XSIZE, double YSIZE, double ZSIZE,
 	intensity = INTENSITY;
 
 	setShadingGroups();
-	createShadeVectorTree();
+	createShadeVectorGraph();
 	initiateGrid();
 
 	MGlobal::displayInfo(MString() + "Grid created with " + (xElements * yElements * zElements) + " units.");

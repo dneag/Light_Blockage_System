@@ -5,14 +5,8 @@ used to simulate phototropic growth in trees.
 
 First, two key data structures are created:
   1.  A cubic grid, represented with a 3 dimensional array of `GridUnit`.
-<<<<<<< HEAD
   2.  A directed acyclic graph where each node is a `ShadeVector`. Each represents a vector of blocked light pointing down to some grid unit, from an obstructed
       location on the grid.  The ShadeVectors of child nodes point to units neighboring and in the same obstructed path from the unit pointed to by their parent. When conditions inside a grid unit change, i.e. obstructing objects are added or removed, shade is propagated along these paths.
-=======
-  2.  A generic tree where each node is a `ShadeVector`. Each represents a vector of blocked light pointing down to some grid unit, from an obstructed
-      location on the grid.  The ShadeVectors of child nodes point to units neighboring and in the same obstructed path from the unit pointed to by their parent. This
-      is used to propagate shade when the conditions in grid units change.
->>>>>>> 21f7c84012e8677e719882004fa0bfef3ebde7a2
 
 With these established, `BlockPoint`s can be added to any location on the grid.  Adding, moving, or removing a BlockPoint will trigger shade propagation, causing
 grid units within a specified range to become more or less shaded.
@@ -22,11 +16,7 @@ grid units within a specified range to become more or less shaded.
 The source code contains a number of utility and debugging classes and methods, so I will highlight here those that are responsible for the core functionality.
 * `BlockPointGrid`
   * `initiateGrid()`
-<<<<<<< HEAD
   * `createShadeVectorGraph()`
-=======
-  * `createShadeVectorTree()`
->>>>>>> 21f7c84012e8677e719882004fa0bfef3ebde7a2
   * `applyShade()`
 * `GridUnit`
 * `BlockPoint`
